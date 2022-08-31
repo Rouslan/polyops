@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes" ?>
+<CodeBlocks_project_file>
+	<FileVersion major="1" minor="6" />
+	<Project>
+		<Option title="inset_test" />
+		<Option pch_mode="2" />
+		<Option compiler="gcc" />
+		<Build>
+			<Target title="Debug">
+				<Option output="bin/Debug/inset_test" prefix_auto="1" extension_auto="1" />
+				<Option object_output="obj/Debug/" />
+				<Option type="1" />
+				<Option compiler="gcc" />
+				<Option parameters="inset_test.html" />
+				<Compiler>
+					<Add option="-g" />
+				</Compiler>
+				<Linker>
+					<Add library="server" />
+					<Add directory="." />
+				</Linker>
+			</Target>
+			<Target title="Release">
+				<Option output="bin/Release/inset_test" prefix_auto="1" extension_auto="1" />
+				<Option object_output="obj/Release/" />
+				<Option type="1" />
+				<Option compiler="gcc" />
+				<Option parameters="inset_test.html" />
+				<Compiler>
+					<Add option="-O2" />
+				</Compiler>
+				<Linker>
+					<Add option="-s" />
+					<Add library="server" />
+					<Add directory="." />
+				</Linker>
+			</Target>
+			<Target title="random_shapes_debug">
+				<Option output="bin/random_shapes/inset_test" prefix_auto="1" extension_auto="1" />
+				<Option object_output="obj/random_shapes/" />
+				<Option type="1" />
+				<Option compiler="gcc" />
+				<Option parameters="test_client.html" />
+				<Compiler>
+					<Add option="-g" />
+				</Compiler>
+				<Linker>
+					<Add library="server" />
+					<Add directory="." />
+				</Linker>
+			</Target>
+			<Target title="server">
+				<Option output="server" imp_lib="$(TARGET_OUTPUT_DIR)$(TARGET_OUTPUT_BASENAME).a" def_file="$(TARGET_OUTPUT_DIR)$(TARGET_OUTPUT_BASENAME).def" prefix_auto="1" extension_auto="1" />
+				<Option type="3" />
+				<Option compiler="gcc" />
+				<Option createDefFile="1" />
+				<Option createStaticLib="1" />
+				<Compiler>
+					<Add option="-fPIC" />
+					<Add option="-Og" />
+					<Add option="-g" />
+				</Compiler>
+			</Target>
+			<Target title="original">
+				<Option output="bin/Debug/original" prefix_auto="1" extension_auto="1" />
+				<Option object_output="objs/Debug" />
+				<Option type="1" />
+				<Option compiler="gcc" />
+				<Option parameters="original_test.html last_rand_state" />
+				<Compiler>
+					<Add option="-g" />
+				</Compiler>
+				<Linker>
+					<Add library="server" />
+					<Add directory="." />
+				</Linker>
+			</Target>
+			<Target title="unit_tests">
+				<Option output="inset_test" prefix_auto="1" extension_auto="1" />
+				<Option type="1" />
+				<Option compiler="gcc" />
+				<Compiler>
+					<Add option="-g" />
+				</Compiler>
+				<Linker>
+					<Add library="boost_unit_test_framework" />
+				</Linker>
+			</Target>
+		</Build>
+		<Compiler>
+			<Add option="-pedantic" />
+			<Add option="-Wextra" />
+			<Add option="-Wall" />
+			<Add option="-std=c++20" />
+		</Compiler>
+		<Linker>
+			<Add option="-pthread" />
+		</Linker>
+		<Unit filename="graphical_test.cpp">
+			<Option target="Debug" />
+			<Option target="Release" />
+		</Unit>
+		<Unit filename="mini_flat_set.hpp">
+			<Option target="Debug" />
+			<Option target="Release" />
+			<Option target="random_shapes_debug" />
+		</Unit>
+		<Unit filename="original.cpp">
+			<Option target="original" />
+		</Unit>
+		<Unit filename="poly_ops.hpp">
+			<Option target="Debug" />
+			<Option target="Release" />
+			<Option target="random_shapes_debug" />
+		</Unit>
+		<Unit filename="random_shapes.cpp">
+			<Option target="random_shapes_debug" />
+		</Unit>
+		<Unit filename="server.cpp">
+			<Option target="server" />
+		</Unit>
+		<Unit filename="server.hpp">
+			<Option target="server" />
+		</Unit>
+		<Unit filename="stream_output.hpp">
+			<Option target="original" />
+			<Option target="unit_tests" />
+		</Unit>
+		<Unit filename="unit_tests.cpp">
+			<Option target="unit_tests" />
+		</Unit>
+		<Extensions />
+	</Project>
+</CodeBlocks_project_file>
