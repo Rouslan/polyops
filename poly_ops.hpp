@@ -68,8 +68,6 @@ All lines that have a non-zero "line balance" are removed.
 #define POLY_OPS_HPP
 
 #include <stdint.h>
-#include <assert.h>
-
 #include <vector>
 #include <set>
 #include <queue>
@@ -92,24 +90,22 @@ All lines that have a non-zero "line balance" are removed.
 #define POLY_OPS_GRAPHICAL_DEBUG 0
 #endif
 
+#ifndef POLY_OPS_ASSERT
+#include <assert.h>
+#define POLY_OPS_ASSERT assert
+
+// used for checks that would drastically slow down the algorithm
+#define POLY_OPS_ASSERT_SLOW(X) (void)0
+#endif
+
 // the graphical test program defines these (in graphical_test.cpp)
-#ifndef DEBUG_STEP_BY_STEP_LINE_BALANCE_CHECK_1
-#define DEBUG_STEP_BY_STEP_LINE_BALANCE_CHECK_1 (void)0
-#define DEBUG_STEP_BY_STEP_LINE_BALANCE_CHECK_2 (void)0
-#define DEBUG_STEP_BY_STEP_LINE_BALANCE_CHECK_3 (void)0
-#define DEBUG_STEP_BY_STEP_ADD_EVENT (void)0
-#define DEBUG_STEP_BY_STEP_CHECK_INTERSECTION_1 (void)0
-#define DEBUG_STEP_BY_STEP_CHECK_INTERSECTION_2 (void)0
-#define DEBUG_STEP_BY_STEP_INTERSECTS_ANY /* nothing */
-#define DEBUG_STEP_BY_STEP_SELF_INTERSECTION_1 (void)0
-#define DEBUG_STEP_BY_STEP_SELF_INTERSECTION_2 (void)0
-#define DEBUG_STEP_BY_STEP_SELF_INTERSECTION_3 (void)0
-#define DEBUG_STEP_BY_STEP_SELF_INTERSECTION_4 (void)0
-#define DEBUG_STEP_BY_STEP_SELF_INTERSECTION_5 (void)0
-#define DEBUG_STEP_BY_STEP_SELF_INTERSECTION_6 (void)0
-#define DEBUG_STEP_BY_STEP_SELF_INTERSECTION_7 (void)0
-#define DEBUG_STEP_BY_STEP_SELF_INTERSECTION_8 (void)0
-#define DEBUG_STEP_BY_STEP_SELF_INTERSECTION_9 (void)0
+#ifndef DEBUG_STEP_BY_STEP_EVENT_F
+#define DEBUG_STEP_BY_STEP_EVENT_F (void)0
+#define DEBUG_STEP_BY_STEP_EVENT_B (void)0
+#define DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE (void)0
+#define DEBUG_STEP_BY_STEP_LB_CHECK_RET_TYPE void
+#define DEBUG_STEP_BY_STEP_LB_CHECK_RETURN(A,B) (void)0
+#define DEBUG_STEP_BY_STEP_LB_CHECK_FF
 #endif
 
 namespace poly_ops {
@@ -194,25 +190,25 @@ concept arithmetic_promotes = requires(Lesser a,Greater b) {
 template<typename T> concept coordinate =
     arithmetic<T>
     && arithmetic<typename coord_ops<T>::long_t>
-    && arithmetic<typename coord_ops<T>::real_t>
-    && arithmetic_promotes<T,typename coord_ops<T>::long_t>
-    && arithmetic_promotes<T,typename coord_ops<T>::real_t>
+    && arithmetic<real_coord_t<T>>
+    && arithmetic_promotes<T,long_coord_t<T>>
+    && arithmetic_promotes<T,real_coord_t<T>>
     && std::totally_ordered<T>
-    && std::totally_ordered<typename coord_ops<T>::long_t>
-    && std::totally_ordered<typename coord_ops<T>::real_t>
-    && std::convertible_to<T,typename coord_ops<T>::long_t>
-    && std::convertible_to<T,typename coord_ops<T>::real_t>
-    && requires(T c,typename coord_ops<T>::long_t cl,typename coord_ops<T>::real_t cr) {
+    && std::totally_ordered<long_coord_t<T>>
+    && std::totally_ordered<real_coord_t<T>>
+    && std::convertible_to<T,long_coord_t<T>>
+    && std::convertible_to<T,real_coord_t<T>>
+    && requires(T c,long_coord_t<T> cl,real_coord_t<T> cr) {
         static_cast<long>(c);
-        { coord_ops<T>::acos(c) } -> std::same_as<typename coord_ops<T>::real_t>;
-        { coord_ops<T>::acos(cr) } -> std::same_as<typename coord_ops<T>::real_t>;
-        { coord_ops<T>::cos(cr) } -> std::same_as<typename coord_ops<T>::real_t>;
-        { coord_ops<T>::sin(cr) } -> std::same_as<typename coord_ops<T>::real_t>;
-        { coord_ops<T>::sqrt(c) } -> std::same_as<typename coord_ops<T>::real_t>;
-        { coord_ops<T>::sqrt(cr) } -> std::same_as<typename coord_ops<T>::real_t>;
+        { coord_ops<T>::acos(c) } -> std::same_as<real_coord_t<T>>;
+        { coord_ops<T>::acos(cr) } -> std::same_as<real_coord_t<T>>;
+        { coord_ops<T>::cos(cr) } -> std::same_as<real_coord_t<T>>;
+        { coord_ops<T>::sin(cr) } -> std::same_as<real_coord_t<T>>;
+        { coord_ops<T>::sqrt(c) } -> std::same_as<real_coord_t<T>>;
+        { coord_ops<T>::sqrt(cr) } -> std::same_as<real_coord_t<T>>;
         { coord_ops<T>::round(cr) } -> std::same_as<T>;
         { coord_ops<T>::floor(cr) } -> std::same_as<T>;
-        { coord_ops<T>::pi() } -> std::same_as<typename coord_ops<T>::real_t>;
+        { coord_ops<T>::pi() } -> std::same_as<real_coord_t<T>>;
     };
 } // namespace detail
 
@@ -291,31 +287,31 @@ template<typename T> struct point_ops<point_t<T>> {
 };
 
 template<typename T,typename U>
-constexpr point_t<std::common_type_t<T,U>> operator+(const point_t<T> &a,const point_t<U> &b) {
+constexpr point_t<decltype(std::declval<T>()+std::declval<U>())> operator+(const point_t<T> &a,const point_t<U> &b) {
     return {a[0]+b[0],a[1]+b[1]};
 }
 
 template<typename T,typename U>
-constexpr point_t<std::common_type_t<T,U>> operator-(const point_t<T> &a,const point_t<U> &b) {
+constexpr point_t<decltype(std::declval<T>()-std::declval<U>())> operator-(const point_t<T> &a,const point_t<U> &b) {
     return {a[0]-b[0],a[1]-b[1]};
 }
 
 template<typename T,typename U>
-constexpr point_t<std::common_type_t<T,U>> operator*(const point_t<T> &a,const point_t<U> &b) {
+constexpr point_t<decltype(std::declval<T>()*std::declval<U>())> operator*(const point_t<T> &a,const point_t<U> &b) {
     return {a[0]*b[0],a[1]*b[1]};
 }
 
 template<typename T,typename U>
-constexpr point_t<std::common_type_t<T,U>> operator/(const point_t<T> &a,const point_t<U> &b) {
+constexpr point_t<decltype(std::declval<T>()/std::declval<U>())> operator/(const point_t<T> &a,const point_t<U> &b) {
     return {a[0]/b[0],a[1]/b[1]};
 }
 
 template<typename T,typename U>
-constexpr point_t<std::common_type_t<T,U>> operator*(const point_t<T> &a,U b) {
+constexpr point_t<decltype(std::declval<T>()*std::declval<U>())> operator*(const point_t<T> &a,U b) {
     return {a[0]*b,a[1]*b};
 }
 template<typename T,typename U>
-constexpr point_t<std::common_type_t<T,U>> operator*(T a,const point_t<U> &b) {
+constexpr point_t<decltype(std::declval<T>()*std::declval<U>())> operator*(T a,const point_t<U> &b) {
     return {a*b[0],a*b[1]};
 }
 
@@ -420,7 +416,7 @@ template<typename Index> struct segment {
 
     /* returns true if point 'a' comes before point 'b' in the loop */
     template<typename T> bool a_is_main(const T &points) const {
-        assert(points[a].next == b || points[b].next == a);
+        POLY_OPS_ASSERT(points[a].next == b || points[b].next == a);
         return points[a].next == b;
     }
 
@@ -430,7 +426,7 @@ template<typename Index> struct segment {
 };
 
 /* the order of these determines their priority from greatest to least */
-enum class event_type_t {forward,calc_balance,backward};
+enum class event_type_t {backward,forward,calc_balance};
 
 template<typename Index> struct event {
     segment<Index> ab;
@@ -450,7 +446,8 @@ template<typename Coord> at_edge_t is_edge(Coord val,Coord end_val) {
     return EDGE_NO;
 }
 
-/* this does not return true if the intersection is two endpoints touching */
+/* this does not return true if the intersection is two endpoints touching or
+the lines are co-linear */
 template<typename Index,typename Coord>
 bool intersects(segment<Index> s1,segment<Index> s2,const loop_point<Index,Coord> *points,point_t<Coord> &p,std::span<at_edge_t,2> at_edge) {
     using long_t = long_coord_t<Coord>;
@@ -468,7 +465,6 @@ bool intersects(segment<Index> s1,segment<Index> s2,const loop_point<Index,Coord
     Coord y4 = s2.b_y(points);
 
     long_t d = static_cast<long_t>(x1-x2)*(y3-y4) - static_cast<long_t>(y1-y2)*(x3-x4);
-    // TODO: what about co-linear lines?
     if(d == 0) return false;
 
     long_t t_i = static_cast<long_t>(x1-x3)*(y3-y4) - static_cast<long_t>(y1-y3)*(x3-x4);
@@ -542,7 +538,7 @@ template<typename Coord> bool line_segment_up_ray_intersection(
 {
     using long_t = long_coord_t<Coord>;
 
-    assert(sa.x() < sb.x());
+    POLY_OPS_ASSERT(sa.x() < sb.x());
 
     if(p.x() < sa.x() || (p.x() == sa.x() && hsign < 0)) return false;
     if(p.x() > sb.x() || (p.x() == sb.x() && hsign > 0)) return false;
@@ -571,7 +567,7 @@ template<typename Coord> std::tuple<bool,bool> dual_line_segment_up_ray_intersec
 {
     using long_t = long_coord_t<Coord>;
 
-    assert(sa.x() < sb.x());
+    POLY_OPS_ASSERT(sa.x() < sb.x());
     if(p.x() < sa.x() || p.x() > sb.x()) return {false,false};
 
     std::tuple r(true,true);
@@ -643,12 +639,12 @@ public:
         hsign1(dp1.x() ? dp1.x() : dp1.y()), hsign2(dp2.x() ? dp2.x() : dp2.y()),
         wn1(dp1.x() < 0 ? -1 : 0), wn2(dp2.x() < 0 ? -1 : 0)
     {
-        assert(hsign1 && hsign2 && p1 != p2 && points[p1].data == points[p2].data);
+        POLY_OPS_ASSERT(hsign1 && hsign2 && p1 != p2 && points[p1].data == points[p2].data);
     }
 
-    void check(segment<Index> s) {
-        assert(s.a_x(points) <= s.b_x(points));
-        if(s.a_x(points) == s.b_x(points)) return;
+    DEBUG_STEP_BY_STEP_LB_CHECK_RET_TYPE check(segment<Index> s) {
+        POLY_OPS_ASSERT(s.a_x(points) <= s.b_x(points));
+        if(s.a_x(points) == s.b_x(points)) return DEBUG_STEP_BY_STEP_LB_CHECK_FF;
 
         bool a_is_main = s.a_is_main(points);
 
@@ -656,16 +652,18 @@ public:
         if(a_is_main ? s.a == p1 : s.b == p1) {
             if(line_segment_up_ray_intersection(points[s.a].data,points[s.b].data,points[p1].data,hsign2,dp2)) {
                 wn2 += a_is_main ? 1 : -1;
+                DEBUG_STEP_BY_STEP_LB_CHECK_RETURN(false,true);
             }
-            return;
+            return DEBUG_STEP_BY_STEP_LB_CHECK_FF;
         }
 
         // is s the line at p2?
         if(a_is_main ? s.a == p2 : s.b == p2) {
             if(line_segment_up_ray_intersection(points[s.a].data,points[s.b].data,points[p1].data,hsign1,dp1)) {
                 wn1 += a_is_main ? 1 : -1;
+                DEBUG_STEP_BY_STEP_LB_CHECK_RETURN(true,false);
             }
-            return;
+            return DEBUG_STEP_BY_STEP_LB_CHECK_FF;
         }
 
         auto [intr1,intr2] = dual_line_segment_up_ray_intersection(
@@ -678,9 +676,17 @@ public:
             dp2);
         if(intr1) wn1 += a_is_main ? 1 : -1;
         if(intr2) wn2 += a_is_main ? 1 : -1;
+
+        POLY_OPS_ASSERT_SLOW(
+            intr1 == line_segment_up_ray_intersection(
+                points[s.a].data,points[s.b].data,points[p1].data,hsign1,dp1));
+        POLY_OPS_ASSERT_SLOW(
+            intr2 == line_segment_up_ray_intersection(
+                points[s.a].data,points[s.b].data,points[p1].data,hsign2,dp2));
+        DEBUG_STEP_BY_STEP_LB_CHECK_RETURN(intr1,intr2);
     }
 
-    std::tuple<bool,bool> result() const { return {wn1,wn2}; }
+    std::tuple<int,int> result() const { return {wn1,wn2}; }
 };
 
 /* order events by the X coordinates increasing and then by event type */
@@ -690,23 +696,8 @@ template<typename Index,typename Coord> struct event_cmp {
     bool operator()(const event<Index> &l1,const event<Index> &l2) const {
         auto r = l1.ab.a_x(lpoints) - l2.ab.a_x(lpoints);
         if(r) return r > 0;
-        r = l1.ab.b_x(lpoints) - l2.ab.b_x(lpoints);
-        if(r) return r > 0;
 
         return l1.type > l2.type;
-    }
-};
-
-/* order events by the X coordinates increasing and then by event type */
-template<typename Index,typename Coord> struct event_cmp2 {
-    std::pmr::vector<loop_point<Index,Coord>> &lpoints;
-
-    bool operator()(const event<Index> &l1,const event<Index> &l2) const {
-        auto r = l1.ab.a_x(lpoints) - l2.ab.a_x(lpoints);
-        if(r) return r > 0;
-        int r2 = static_cast<int>(l1.type) - static_cast<int>(l2.type);
-        if(r2) return r2;
-        return l1.ab.b_x(lpoints) > l2.ab.b_x(lpoints);
     }
 };
 
@@ -716,7 +707,6 @@ using events_t = std::priority_queue<event<Index>,std::pmr::vector<event<Index>>
 template<typename Index,typename Coord>
 void add_event(events_t<Index,Coord> &events,Index sa,Index sb,event_type_t t) {
     events.emplace(segment<Index>{sa,sb},t);
-    DEBUG_STEP_BY_STEP_ADD_EVENT;
 }
 
 /* Line segments are ordered by whether they are "above" other segments or not.
@@ -763,69 +753,17 @@ template<typename Index,typename Coord> struct sweep_cmp {
     }
 };
 
-/*template<typename Index,typename Coord> struct sweep_cmp2 {
-    std::pmr::vector<loop_point<Index,Coord>> &lpoints;
-
-    bool operator()(segment<Index> s1,segment<Index> s2) const {
-        {
-            Coord ay1 = s1.a_y(lpoints);
-            Coord by1 = s1.b_y(lpoints);
-            if(by1 > ay1) std::swap(ay1,by1);
-            Coord ay2 = s2.a_y(lpoints);
-            Coord by2 = s2.b_y(lpoints);
-            if(by2 > ay2) std::swap(ay2,by2);
-            Coord d = ay1 - ay2;
-            if(d) return d > 0;
-
-            d = by1 - by2;
-            if(d) return d > 0;
-        }
-        Index d = s1.b - s2.b;
-        if(!d) d = s1.a - s2.a;
-        return d > 0;
-    }
-};*/
-
 template<typename Index,typename Coord>
 using sweep_t = std::pmr::set<segment<Index>,sweep_cmp<Index,Coord>>;
 
-template<typename Index,typename Coord>
-sweep_t<Index,Coord>::const_iterator line_before(
-    const sweep_t<Index,Coord> &sweep,
-    typename sweep_t<Index,Coord>::const_iterator next,
-    Index p,
-    const loop_point<Index,Coord> *points)
-{
-    while(next != sweep.begin()) {
-        --next;
-        /*if(points[next->a].data[1] != points[p].data[1])*/ return next;
-    }
-    return sweep.end();
-}
-
-template<typename Index,typename Coord>
-sweep_t<Index,Coord>::const_iterator line_at_or_after(
-    const sweep_t<Index,Coord> &sweep,
-    typename sweep_t<Index,Coord>::const_iterator next,
-    Index p,
-    const loop_point<Index,Coord> *points)
-{
-    while(next != sweep.end()) {
-        /*if(points[next->a].data[1] != points[p].data[1])*/ return next;
-        ++next;
-    }
-    return sweep.end();
-}
-
 #ifndef NDEBUG
-/* this returns true so it can be put in an assert statement */
 template<typename Index,typename Coord>
 bool check_integrity(
     const std::pmr::vector<loop_point<Index,Coord>> &points,
     const sweep_t<Index,Coord> &sweep)
 {
     for(auto &s : sweep) {
-        assert(points[s.a].next == s.b || points[s.b].next == s.a);
+        if(!(points[s.a].next == s.b || points[s.b].next == s.a)) return false;
     }
     return true;
 }
@@ -864,7 +802,7 @@ Index split_segment(
 
     points[sa].next = points.size();
     points.emplace_back(c,new_set,sb,loop_point<Index,Coord>::UNDEF_LINE_BAL);
-    assert(check_integrity(points,sweep));
+    POLY_OPS_ASSERT_SLOW(check_integrity(points,sweep));
 
     if(points[sa].data[0] <= points[sb].data[0]) {
         add_event(events,sa,points[sa].next,event_type_t::forward);
@@ -894,9 +832,7 @@ bool check_intersection(
     point_t<Coord> intr;
     at_edge_t at_edge[2];
     if(intersects(s1,s2,points.data(),intr,at_edge)) {
-        assert(!at_edge[0] || !at_edge[1]);
-
-        DEBUG_STEP_BY_STEP_CHECK_INTERSECTION_1;
+        POLY_OPS_ASSERT(!at_edge[0] || !at_edge[1]);
 
         /* both instances of loop_point are treated like a single point and will
            refer to the same set */
@@ -913,7 +849,6 @@ bool check_intersection(
 
         return true;
     }
-    DEBUG_STEP_BY_STEP_CHECK_INTERSECTION_2;
 
     return false;
 }
@@ -934,13 +869,17 @@ template<typename T,typename Coord> concept sized_or_forward_polygon = requires(
     { v.inner_loops() } -> sized_or_forward_point_range_range<Coord>;
 };
 
-template<typename T> inline size_t total_point_count(const T&) { return 100; }
+template<typename,typename T> struct total_point_count {
+    static inline size_t doit(const T&) { return 100; }
+};
 
-template<typename Coord,sized_or_forward_polygon<Coord> T> size_t total_point_count(const T &x) {
-    size_t s = std::ranges::distance(x.outer_loop());
-    for(auto &&loop : x.inner_loops()) s += std::ranges::distance(loop);
-    return s;
-}
+template<typename Coord,sized_or_forward_polygon<Coord> T> struct total_point_count<Coord,T> {
+    static size_t doit(const T &x) {
+        size_t s = std::ranges::distance(x.outer_loop());
+        for(auto &&loop : x.inner_loops()) s += std::ranges::distance(loop);
+        return s;
+    }
+};
 
 template<typename Index,typename Coord>
 struct offset_polygon_point {
@@ -1001,11 +940,12 @@ struct offset_polygon_point {
 
             real_coord_t<Coord> angle = coord_ops<Coord>::pi() - vangle<Coord>(p1-p2,p3-p2);
             Coord steps = coord_ops<Coord>::floor(magnitude * angle / arc_step_size);
-            if(std::abs(steps) > 1) {
+            long lsteps = std::abs(static_cast<long>(steps));
+            if(lsteps > 1) {
                 real_coord_t<Coord> s = coord_ops<Coord>::sin(angle / steps);
                 real_coord_t<Coord> c = coord_ops<Coord>::cos(angle / steps);
 
-                for(long i=1; i<std::abs(static_cast<long>(steps)); ++i) {
+                for(long i=1; i<lsteps; ++i) {
                     offset = {c*offset[0] - s*offset[1],s*offset[0] + c*offset[1]};
                     offset_point = p2 + vround<Coord>(offset);
 
@@ -1078,7 +1018,11 @@ std::tuple<std::pmr::vector<loop_point<Index,Coord>>,original_sets_t<Index>> off
     Coord arc_step_size,
     std::pmr::memory_resource *contig_mem)
 {
-    offset_polygon_point<Index,Coord> opp(magnitude,arc_step_size,total_point_count(input),contig_mem);
+    offset_polygon_point<Index,Coord> opp(
+        magnitude,
+        arc_step_size,
+        total_point_count<Coord,Input>::doit(input),
+        contig_mem);
 
     offset_polygon_loop(opp,input.outer_loop());
     for(auto &&loop : input.inner_loops()) offset_polygon_loop(opp,loop);
@@ -1100,10 +1044,6 @@ bool intersects_any(segment<Index> s1,const sweep_t<Index,Coord> &sweep,const lo
 }
 #endif
 
-template<typename Index> struct intersection_data {
-    Index p1, p2;
-    std::pmr::vector<Index> lines_above1, lines_above2;
-};
 
 /* This is a modified version of the Bentley–Ottmann algorithm. Lines are broken
    at intersections. Two end-points touching does not count as an intersection.
@@ -1157,58 +1097,38 @@ std::pmr::vector<Index> self_intersection(
             sweep_removed.clear();
         }
 
-        assert(std::ranges::all_of(sweep,[=,&lpoints](segment<Index> s) {
+        /*POLY_OPS_ASSERT_SLOW(std::ranges::all_of(sweep,[=,&lpoints](segment<Index> s) {
             return last_x >= s.a_x(lpoints) && last_x <= s.b_x(lpoints);
-        }));
+        }));*/
 
         switch(e.type) {
         case event_type_t::forward:
             {
-                DEBUG_STEP_BY_STEP_SELF_INTERSECTION_1;
-
                 auto itr = std::get<0>(sweep.insert(e.ab));
-                auto before = line_before(sweep,itr,e.ab.a,lpoints.data());
 
-                DEBUG_STEP_BY_STEP_SELF_INTERSECTION_2;
+                DEBUG_STEP_BY_STEP_EVENT_F;
 
-                if(before != sweep.end() && check_intersection(events,intrs,original_sets,sweep,lpoints,e.ab,*before)) continue;
+                if(itr != sweep.begin() && check_intersection(events,intrs,original_sets,sweep,lpoints,e.ab,*std::prev(itr))) continue;
                 ++itr;
-                itr = line_at_or_after(sweep,itr,e.ab.a,lpoints.data());
-
-                DEBUG_STEP_BY_STEP_SELF_INTERSECTION_3;
-
                 if(itr != sweep.end()) check_intersection(events,intrs,original_sets,sweep,lpoints,e.ab,*itr);
             }
             break;
         case event_type_t::backward:
             {
-                DEBUG_STEP_BY_STEP_SELF_INTERSECTION_4;
-
                 auto itr = sweep.find(e.line_ba());
 
-                /* if it's not in here, the line was split and no longer exists
-                 */
+                // if it's not in here, the line was split and no longer exists
                 if(itr != sweep.end()) {
                     sweep_removed.push_back(*itr);
                     itr = sweep.erase(itr);
 
-                    DEBUG_STEP_BY_STEP_SELF_INTERSECTION_5;
+                    DEBUG_STEP_BY_STEP_EVENT_B;
 
-                    while(itr != sweep.end()) {
-                        auto before = line_before(sweep,itr,itr->a,lpoints.data());
-
-                        DEBUG_STEP_BY_STEP_SELF_INTERSECTION_6;
-
-                        if(before != sweep.end()) {
-                            /*itr = line_at_or_after(sweep,itr,e.ab.b,lpoints.data());
-                            if(itr != sweep.end())*/ check_intersection(events,intrs,original_sets,sweep,lpoints,*before,*itr);
-                        }
-
-                        if(itr->a != e.ab.b) break;
-                        ++itr;
+                    if(itr != sweep.end() && itr != sweep.begin()) {
+                        check_intersection(events,intrs,original_sets,sweep,lpoints,*std::prev(itr),*itr);
                     }
 
-                    assert(!intersects_any(e.line_ba(),sweep,lpoints.data()));
+                    POLY_OPS_ASSERT_SLOW(!intersects_any(e.line_ba(),sweep,lpoints.data()));
                 }
             }
             break;
@@ -1219,17 +1139,17 @@ std::pmr::vector<Index> self_intersection(
                 the line number only changes between intersections and all the
                 lines form loops, we only need to compute the number for lines
                 whose first point is an intersection. */
-                //DEBUG_STEP_BY_STEP_SELF_INTERSECTION_8;
+
+                DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE;
 
                 line_balance<Index,Coord> lb{lpoints.data(),e.ab.a,e.ab.b};
                 for(const segment<Index> &s : sweep) lb.check(s);
                 for(const segment<Index> &s : sweep_removed) lb.check(s);
-                lpoints[e.ab.a].line_bal = std::get<0>(lb.result());
-                lpoints[e.ab.b].line_bal = std::get<1>(lb.result());
-
-                //DEBUG_STEP_BY_STEP_SELF_INTERSECTION_9;
-                break;
+                std::tie(
+                    lpoints[e.ab.a].line_bal,
+                    lpoints[e.ab.b].line_bal) = lb.result();
             }
+            break;
         }
     }
 
@@ -1268,7 +1188,7 @@ void follow_balance(
     broken_starts_t<Index,Coord> &broken_starts,
     original_sets_t<Index> &original_sets)
 {
-    assert((points[intr].line_bal != loop_point<Index,Coord>::UNDEF_LINE_BAL));
+    POLY_OPS_ASSERT((points[intr].line_bal != loop_point<Index,Coord>::UNDEF_LINE_BAL));
     Index next = points[intr].next;
     Index prev = intr;
     while(next != intr) {
@@ -1308,12 +1228,12 @@ template<typename Index,typename Coord> class proto_loop_iterator {
 
 public:
     bool operator==(const proto_loop_iterator &b) const {
-        assert(lpoints == b.lpoints);
+        POLY_OPS_ASSERT(lpoints == b.lpoints);
         return i == b.it;
     }
 
     bool operator!=(const proto_loop_iterator &b) const {
-        assert(lpoints == b.lpoints);
+        POLY_OPS_ASSERT(lpoints == b.lpoints);
         return i != b.it;
     }
 
@@ -1338,12 +1258,12 @@ template<typename Index,typename Coord> class tracked_proto_loop_iterator {
 
 public:
     bool operator==(const tracked_proto_loop_iterator &b) const {
-        assert(lpoints == b.lpoints && original_sets == b.original_sets);
+        POLY_OPS_ASSERT(lpoints == b.lpoints && original_sets == b.original_sets);
         return i == b.it;
     }
 
     bool operator!=(const tracked_proto_loop_iterator &b) const {
-        assert(lpoints == b.lpoints && original_sets == b.original_sets);
+        POLY_OPS_ASSERT(lpoints == b.lpoints && original_sets == b.original_sets);
         return i != b.it;
     }
 
@@ -1380,18 +1300,23 @@ void normalize_polygons(
         follow_balance<Index,Coord>(lpoints.data(),intr,broken_ends,broken_starts,original_sets);
     }
 
+#if POLY_OPS_GRAPHICAL_DEBUG
+    if(mc__) mc__->console_line_stream() << "broken_starts: " << pp(broken_starts) << "\nbroken_ends: " << pp(broken_ends);
+    delegate_drawing_trimmed(lpoints,original_sets);
+#endif
+
     /* match all the points in broken_starts and broken_ends to make new loops
     where all the points have a line balance of 0 */
     for(auto intr : broken_ends) {
         auto &os = broken_starts[lpoints[lpoints[intr].next].data];
-        assert(os.size());
+        POLY_OPS_ASSERT(os.size());
         merge_original_sets<Index,Coord>(lpoints.data(),original_sets,lpoints[intr].next,os.back());
         lpoints[intr].next = os.back();
         os.pop_back();
     }
 
     // there shouldn't be any left
-    assert(std::all_of(
+    POLY_OPS_ASSERT(std::all_of(
         broken_starts.begin(),
         broken_starts.end(),
         [](const broken_starts_t<Index,Coord>::value_type &v) { return std::get<1>(v).empty(); }));
@@ -1424,9 +1349,8 @@ void normalize_polygons(
             scanned again */
             lpoints[i].line_bal = 1;
 
-            size_t j = lpoints[i].next;
-            while(j != i) {
-                assert(lpoints[j].line_bal == 0);
+            for(size_t j = lpoints[i].next; j != i; j = lpoints[j].next) {
+                POLY_OPS_ASSERT(lpoints[j].line_bal == 0);
 
                 ++loops.back().size;
                 lpoints[j].line_bal = 1;
@@ -1509,4 +1433,8 @@ struct basic_polygon {
 };
 
 } // namespace poly_ops
+
+#undef DEBUG_STEP_BY_STEP_EVENT_F
+#undef DEBUG_STEP_BY_STEP_EVENT_B
+
 #endif

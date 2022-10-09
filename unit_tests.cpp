@@ -19,6 +19,10 @@ auto make_lp(coord_t x,coord_t y,index_t next) {
     return detail::loop_point<index_t,coord_t>(point_t<coord_t>(x,y),0,next);
 }
 
+auto make_lp(coord_t x,coord_t y,index_t next,int line_bal) {
+    return detail::loop_point<index_t,coord_t>(point_t<coord_t>(x,y),0,next,line_bal);
+}
+
 std::ostream &operator<<(std::ostream &os,const point_t<coord_t> &x) {
     return os << x[0] << ',' << x[1];
 }
@@ -256,4 +260,29 @@ BOOST_AUTO_TEST_CASE(test_point_on_edge_intersect) {
     detail::at_edge_t at_edge[2];
     BOOST_CHECK(intersects(s1,s2,lpoints.data(),intr,at_edge));
     BOOST_CHECK(intersects(s2,s1,lpoints.data(),intr,at_edge));
+}
+
+BOOST_AUTO_TEST_CASE(test_follow_balance) {
+    std::pmr::vector<detail::loop_point<index_t,coord_t>> lpoints{
+        make_lp(0,1,1),
+        make_lp(2,3,2,0),
+        make_lp(4,5,3),
+        make_lp(2,3,4,-1),
+        make_lp(6,7,5),
+        make_lp(8,9,0),
+    };
+
+    detail::original_sets_t<index_t> original_sets(std::pmr::get_default_resource());
+    original_sets.emplace_back();
+
+    detail::broken_starts_t<index_t,coord_t> broken_starts;
+    std::pmr::vector<index_t> broken_ends;
+
+    follow_balance<index_t,coord_t>(lpoints.data(),1,broken_ends,broken_starts,original_sets);
+    follow_balance<index_t,coord_t>(lpoints.data(),3,broken_ends,broken_starts,original_sets);
+
+    BOOST_CHECK(broken_starts.size() == 1);
+    auto itr = broken_starts.find(point_t<coord_t>(2,3));
+    BOOST_CHECK(itr != broken_starts.end() && itr->second.size() == 1 && itr->second[0] == 1);
+    BOOST_CHECK(broken_ends.size() == 1 && broken_ends[0] == 2);
 }

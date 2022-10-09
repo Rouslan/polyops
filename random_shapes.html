@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+  <meta charset="utf-8">
+  <title>Test Client</title>
+  <link rel="stylesheet" href="/common.css">
+  <style>
+    .scaleinvariant { /* an attribute is added here via JavaScript */ }
+  </style>
+</head>
+<body>
+  <div id="hgroup">
+    <div id="graphics">
+      <div id="graphicsctrl">
+        <div>
+          <button id="bZoomIn" type="button">+</button>
+          <input id="zoomValue" type="text" size="5" inputmode="number" enterkeyhint="done">
+          <button id="bZoomOut" type="button">&minus;</button>
+        </div>
+        <div><label><input type="checkbox" id="showvlabeltoggle" checked>Show labels</label></div>
+      </div>
+      <svg viewBox="0 0 200 200"></svg>
+    </div>
+    <div id="socketIO">
+      <div id="socketI">
+        <button id="bContinue" disabled autofocus type="button">Continue</button>
+        <button id="bDumpSweep" disabled type="button">Dump Sweep</button>
+        <label><input type="checkbox" id="showrawtoggle">Show raw input</label>
+      </div>
+      <div id="socketO"></div>
+    </div>
+  </div>
+  <div id="statusbar">&nbsp;</div>
+  <script type="module">
+    import initInterface from '/common.js';
+    initInterface(document);
+  </script>
+</body>
+</html>

@@ -6,6 +6,7 @@
 #include <type_traits>
 #include <iterator>
 #include <vector>
+#include <cassert>
 
 namespace poly_ops::detail {
 

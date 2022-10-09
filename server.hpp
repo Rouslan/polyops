@@ -46,7 +46,7 @@ namespace json {
                 { to_json_value(x) } -> json_value;
             };
 
-        template<json_value T> constexpr T normalize(const T &x) { return x; }
+        template<typename T> requires json_value<std::remove_cvref_t<T>> constexpr T normalize(T &&x) { return x; }
         constexpr auto normalize(decltype(nullptr) x) { return x; }
         template<std::convertible_to<std::string_view> T>
         constexpr std::string_view normalize(const T &x) { return x; }
@@ -55,11 +55,14 @@ namespace json {
             return to_json_value(std::forward<T>(x));
         }
 
+        template<typename... T> constexpr auto normalize(const std::tuple<T...> &x);
+        template<typename... T> constexpr auto normalize(std::tuple<T...> &&x);
+
         template<typename T> using normalized = decltype(normalize(std::declval<T>()));
 
         template<std::ranges::input_range R>
         requires json_value<detail::normalized<std::ranges::range_value_t<R>>>
-        struct is_obj<array<const R&>> : std::true_type {};
+        struct is_obj<array<R>> : std::true_type {};
 
         template<json_value T> struct attr_value {
             std::string_view name;
@@ -75,6 +78,21 @@ namespace json {
 
     template<typename T> concept json_value_convertable = json_value<detail::normalized<T>>;
 
+    namespace detail {
+        struct array_tuple_t {
+            template<json_value_convertable... T>
+            constexpr auto operator()(const T&... values) {
+                return detail::array{std::tuple(normalize(values)...)};
+            }
+        };
+        template<typename... T> constexpr auto normalize(const std::tuple<T...> &x) {
+            return std::apply(array_tuple_t{},x);
+        }
+        template<typename... T> constexpr auto normalize(std::tuple<T...> &&x) {
+            return std::apply(array_tuple_t{},x);
+        }
+    }
+
     struct attr {
         std::string_view name;
 
@@ -88,14 +106,12 @@ namespace json {
         return detail::obj<T...>{values...};
     }
 
-    template<json_value_convertable... T>
-    constexpr auto array_tuple(const T&... values) {
-        return detail::array{std::tuple(normalize(values)...)};
-    }
+    constexpr inline detail::array_tuple_t array_tuple;
+
     template<std::ranges::input_range R>
     requires json_value_convertable<std::ranges::range_value_t<R>>
-    constexpr auto array_range(const R &r) {
-        return detail::array<const R&>{r};
+    constexpr auto array_range(R &&r) {
+        return detail::array<R>{std::forward<R>(r)};
     }
 
     /* escapes all input to an underlying stream buffer */
@@ -219,7 +235,7 @@ public:
 
 using input_fun = std::function<void(message_canvas&)>;
 
-VISIBLE void run_message_server(const char *html_file,input_fun fun);
+VISIBLE void run_message_server(const char *html_file,const char *support_dir,input_fun fun);
 
 #undef VISIBLE
 

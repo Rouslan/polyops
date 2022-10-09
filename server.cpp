@@ -26,6 +26,12 @@
 
 #include "server.hpp"
 
+#if BOOST_OS_WINDOWS
+#define DIR_SEPARATOR '\\'
+#else
+#define DIR_SEPARATOR '/'
+#endif
+
 namespace beast = boost::beast;
 namespace websocket = beast::websocket;
 namespace net = boost::asio;
@@ -193,14 +199,13 @@ http::response<http::string_body> bad_request(
 
 template<typename Body,typename Allocator>
 http::response<http::string_body> not_found(
-    const http::request<Body,http::basic_fields<Allocator>> &req,
-    std::string_view target)
+    const http::request<Body,http::basic_fields<Allocator>> &req)
 {
     http::response<http::string_body> res{http::status::not_found,req.version()};
     res.set(http::field::server,BOOST_BEAST_VERSION_STRING);
     res.set(http::field::content_type,"text/html");
     res.keep_alive(req.keep_alive());
-    res.body() = "The resource '" + std::string(target) + "' was not found.";
+    res.body() = "The resource '" + std::string(req.target()) + "' was not found.";
     res.prepare_payload();
     return res;
 }
@@ -219,20 +224,61 @@ http::response<http::string_body> server_error(
     return res;
 }
 
+// this requires suffixes to be lower-case
+std::string_view mime_type(std::string_view path) {
+    using namespace std::literals;
+
+    if(path.ends_with(".html"sv)) return "text/html";
+    if(path.ends_with(".css"sv)) return "text/css";
+    if(path.ends_with(".js"sv)) return "application/javascript";
+    return "application/text";
+}
+
+// only very basic paths are supported
+bool allowed_path(std::string_view path) {
+    assert(!(path.empty() || path == "/"));
+    if(path[0] != '/') return false;
+    if(path[1] == '.') return false;
+    for(size_t i=1; i<path.size(); ++i) {
+        char c = path[i];
+        if(!((c >= '0' && c <= '9')
+            || (c >= 'A' && c <= 'Z')
+            || (c >= 'a' && c <= 'z')
+            || c == '_'
+            || c == '.')) return false;
+    }
+    return true;
+}
+
 template<typename Body,typename Allocator,typename Send>
 void handle_request(
     const char *html_file,
-    http::request<Body,http::basic_fields<Allocator>>&& req,
-    Send&& send)
+    const char *support_dir,
+    http::request<Body,http::basic_fields<Allocator>> &&req,
+    Send &&send)
 {
-    if( req.method() != http::verb::get &&
-        req.method() != http::verb::head)
+    if(req.method() != http::verb::get && req.method() != http::verb::head)
         return send(bad_request(req,"Unknown HTTP-method"));
+
+    std::string path;
+    std::string_view mime;
+    if(req.target().empty() || req.target() == "/") {
+        path = html_file;
+        mime = "text/html";
+    } else {
+        if(!support_dir || !allowed_path(req.target())) return send(not_found(req));
+        path = support_dir;
+        if(path.size() && path.back() != DIR_SEPARATOR) path += DIR_SEPARATOR;
+        path += req.target();
+        mime = mime_type(req.target().substr(1));
+    }
 
     beast::error_code ec;
     http::file_body::value_type body;
-    body.open(html_file,beast::file_mode::scan,ec);
+    body.open(path.c_str(),beast::file_mode::scan,ec);
 
+    if(ec == boost::system::errc::no_such_file_or_directory)
+        return send(not_found(req));
     if(ec) return send(server_error(req,ec.message()));
 
     const auto bsize = body.size();
@@ -240,7 +286,7 @@ void handle_request(
     if(req.method() == http::verb::head) {
         http::response<http::empty_body> res{http::status::ok,req.version()};
         res.set(http::field::server,BOOST_BEAST_VERSION_STRING);
-        res.set(http::field::content_type,"text/html");
+        res.set(http::field::content_type,mime);
         res.content_length(bsize);
         res.keep_alive(req.keep_alive());
         return send(std::move(res));
@@ -251,7 +297,7 @@ void handle_request(
         req.version(),
         std::move(body)};
     res.set(http::field::server,BOOST_BEAST_VERSION_STRING);
-    res.set(http::field::content_type,"text/html");
+    res.set(http::field::content_type,mime);
     res.content_length(bsize);
     res.keep_alive(req.keep_alive());
     return send(std::move(res));
@@ -259,6 +305,7 @@ void handle_request(
 
 class http_session : public std::enable_shared_from_this<http_session> {
     const char *html_file;
+    const char *support_dir;
     tcp::socket socket;
     input_fun fun;
     beast::flat_buffer buffer;
@@ -266,8 +313,8 @@ class http_session : public std::enable_shared_from_this<http_session> {
     std::shared_ptr<void> res;
 
 public:
-    http_session(const char *html_file,tcp::socket socket,input_fun fun)
-        : html_file(html_file), socket(std::move(socket)), fun(fun) {}
+    http_session(const char *html_file,const char *support_dir,tcp::socket socket,input_fun fun)
+        : html_file(html_file), support_dir(support_dir), socket(std::move(socket)), fun(fun) {}
 
     void run() { do_read(); }
 
@@ -294,6 +341,7 @@ public:
 
         handle_request(
             html_file,
+            support_dir,
             std::move(req),
             [this]<bool isRequest,typename Body,typename Fields>(http::message<isRequest,Body,Fields>&& msg) {
                 auto sp = std::make_shared<
@@ -327,13 +375,14 @@ public:
 
 class listener : public std::enable_shared_from_this<listener> {
     const char *html_file;
+    const char *support_dir;
     net::io_context &ioc;
     tcp::acceptor acceptor;
     input_fun fun;
 
 public:
-    listener(const char *html_file,net::io_context &ioc,tcp::endpoint endpoint,input_fun fun)
-        : html_file(html_file), ioc(ioc), acceptor(ioc), fun(fun)
+    listener(const char *html_file,const char *support_dir,net::io_context &ioc,tcp::endpoint endpoint,input_fun fun)
+        : html_file(html_file), support_dir(support_dir), ioc(ioc), acceptor(ioc), fun(fun)
     {
         acceptor.open(endpoint.protocol());
         acceptor.set_option(net::socket_base::reuse_address(true));
@@ -352,18 +401,18 @@ private:
 
     void on_accept(beast::error_code ec,tcp::socket socket) {
         if(ec) post_error(ioc.get_executor(),ec);
-        else std::make_shared<http_session>(html_file,std::move(socket),fun)->run();
+        else std::make_shared<http_session>(html_file,support_dir,std::move(socket),fun)->run();
 
         do_accept();
     }
 };
 }
 
-void run_message_server(const char *html_file,input_fun fun) {
+void run_message_server(const char *html_file,const char *support_dir,input_fun fun) {
     net::io_context ioc{1};
 
     tcp::endpoint ep{net::ip::address_v4::loopback(),8080};
-    std::make_shared<listener>(html_file,ioc,ep,fun)->run();
+    std::make_shared<listener>(html_file,support_dir,ioc,ep,fun)->run();
 
     net::signal_set signals(ioc,SIGINT,SIGTERM);
     signals.async_wait([&](const beast::error_code&,int) { ioc.stop(); });

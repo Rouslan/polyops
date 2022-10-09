@@ -245,7 +245,7 @@ std::pmr::vector<index_t> self_intersection_orig(
                     }
                     throw assertion_failure{"segment appears to have been inserted into sweep twice"};
                 }
-                auto before = line_before(sweep,itr,e.ab.a,lpoints.data());
+                auto before = itr == sweep.begin() ? sweep.end() : std::prev(itr);
 
                 if(step_by_step) {
                     mc__->console_line_stream() << "event: FORWARD at "
@@ -258,7 +258,6 @@ std::pmr::vector<index_t> self_intersection_orig(
 
                 if(before != sweep.end() && check_intersection(events,intrs,original_sets,sweep,lpoints,e.ab,*before)) continue;
                 ++itr;
-                itr = line_at_or_after(sweep,itr,e.ab.a,lpoints.data());
 
                 if(step_by_step)
                     emit_line_before_after("line after: ",itr,sweep.end());
@@ -286,15 +285,12 @@ std::pmr::vector<index_t> self_intersection_orig(
                         emit_line_before_after("line after: ",itr,sweep.end());
 
                     if(itr != sweep.end()) {
-                        auto before = line_before(sweep,itr,itr->a,lpoints.data());
+                        auto before = itr == sweep.begin() ? sweep.end() : std::prev(itr);
 
                         if(step_by_step)
                             emit_line_before_after("line before: ",before,sweep.end());
 
-                        if(before != sweep.end()) {
-                            /*itr = line_at_or_after(sweep,itr,e.ab.b,lpoints.data());
-                            if(itr != sweep.end())*/ check_intersection(events,intrs,original_sets,sweep,lpoints,*before,*itr);
-                        }
+                        if(before != sweep.end()) check_intersection(events,intrs,original_sets,sweep,lpoints,*before,*itr);
                     }
 
                     if(intersects_any(e.line_ba(),sweep,lpoints.data()))

@@ -40,7 +40,7 @@
 				<Option object_output="obj/random_shapes/" />
 				<Option type="1" />
 				<Option compiler="gcc" />
-				<Option parameters="test_client.html" />
+				<Option parameters="random_shapes.html web_support" />
 				<Compiler>
 					<Add option="-g" />
 				</Compiler>
@@ -57,7 +57,6 @@
 				<Option createStaticLib="1" />
 				<Compiler>
 					<Add option="-fPIC" />
-					<Add option="-Og" />
 					<Add option="-g" />
 				</Compiler>
 			</Target>
@@ -92,6 +91,7 @@
 			<Add option="-Wextra" />
 			<Add option="-Wall" />
 			<Add option="-std=c++20" />
+			<Add option="-fconcepts-diagnostics-depth=2" />
 		</Compiler>
 		<Linker>
 			<Add option="-pthread" />
@@ -99,6 +99,10 @@
 		<Unit filename="graphical_test.cpp">
 			<Option target="Debug" />
 			<Option target="Release" />
+		</Unit>
+		<Unit filename="graphical_test_common.hpp">
+			<Option target="random_shapes_debug" />
+			<Option target="original" />
 		</Unit>
 		<Unit filename="mini_flat_set.hpp">
 			<Option target="Debug" />
