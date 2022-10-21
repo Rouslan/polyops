@@ -1,5 +1,5 @@
 /*
-The process to create the inset shapes is the following:
+The process to create the inset/outset shapes is the following:
 
 Given a shape consisting of polygons where the points of the outer wall are
 oriented clockwise and the holes are oriented counter-clockwise:
@@ -13,7 +13,7 @@ oriented clockwise and the holes are oriented counter-clockwise:
        \  /
         \/
 
-The lines are moved inward by the inset magnitude.
+The lines are moved by the inset/outset magnitude.
   \            /
 ___\__________/___
     \        /
@@ -106,6 +106,7 @@ All lines that have a non-zero "line balance" are removed.
 #define DEBUG_STEP_BY_STEP_LB_CHECK_RET_TYPE void
 #define DEBUG_STEP_BY_STEP_LB_CHECK_RETURN(A,B) (void)0
 #define DEBUG_STEP_BY_STEP_LB_CHECK_FF
+#define DEBUG_STEP_BY_STEP_MISSED_INTR (void)0
 #endif
 
 namespace poly_ops {
@@ -279,6 +280,12 @@ template<typename T> struct point_t {
     constexpr point_t operator-() const {
         return {-_data[0],-_data[1]};
     }
+
+    friend constexpr void swap(point_t &a,point_t &b) noexcept(std::is_nothrow_swappable_v<T>) {
+        using std::swap;
+        swap(a._data[0],b._data[0]);
+        swap(a._data[1],b._data[1]);
+    }
 };
 
 template<typename T> struct point_ops<point_t<T>> {
@@ -397,13 +404,29 @@ template<typename Index,typename Coord> struct loop_point {
     Index next;
 
     static const int UNDEF_LINE_BAL = std::numeric_limits<int>::lowest();
+
+    /* Represents a point that needs to be removed.
+
+    This is not a unique value; any value besides zero will be removed. */
+    static const int REMOVE_LINE_BAL = 1;
+
     int line_bal;
 
     loop_point() = default;
     loop_point(point_t<Coord> data,Index original_set,Index next,int line_bal=UNDEF_LINE_BAL) :
         data{data}, original_set{original_set}, next{next}, line_bal{line_bal} {}
+
+    friend void swap(loop_point &a,loop_point &b) {
+        using std::swap;
+
+        swap(a.data,b.data);
+        swap(a.original_set,b.original_set);
+        swap(a.next,b.next);
+        swap(a.line_bal,b.line_bal);
+    }
 };
 template<typename Index,typename Coord> const int loop_point<Index,Coord>::UNDEF_LINE_BAL;
+template<typename Index,typename Coord> const int loop_point<Index,Coord>::REMOVE_LINE_BAL;
 
 template<typename Index> struct segment {
     Index a;
@@ -425,8 +448,16 @@ template<typename Index> struct segment {
     }
 };
 
-/* the order of these determines their priority from greatest to least */
-enum class event_type_t {backward,forward,calc_balance};
+/* The order of these determines their priority from greatest to least.
+
+"vforward" and "vbackward" have the same meaning as "forward" and "backward" but
+have different priorities. They are used for vertical lines, which, unlike
+non-vertical lines, can intersect with lines that start and end at the same X
+coordinate as the start/end of the vertical line.
+
+The comparison functor "sweep_cmp" requires that "backward" come before
+"forward". */
+enum class event_type_t {vforward,backward,forward,vbackward,calc_balance};
 
 template<typename Index> struct event {
     segment<Index> ab;
@@ -446,14 +477,13 @@ template<typename Coord> at_edge_t is_edge(Coord val,Coord end_val) {
     return EDGE_NO;
 }
 
-/* this does not return true if the intersection is two endpoints touching or
-the lines are co-linear */
+/* Check if two line segments intersect.
+
+Returns "true" if the lines intersect at a single point, and that point is not
+an endpoint for at least one of the lines. */
 template<typename Index,typename Coord>
 bool intersects(segment<Index> s1,segment<Index> s2,const loop_point<Index,Coord> *points,point_t<Coord> &p,std::span<at_edge_t,2> at_edge) {
     using long_t = long_coord_t<Coord>;
-
-    // connected lines do not count as intersecting
-    if(s1.a == s2.a || s1.a == s2.b || s1.b == s2.a || s1.b == s2.b) return false;
 
     Coord x1 = s1.a_x(points);
     Coord y1 = s1.a_y(points);
@@ -466,6 +496,9 @@ bool intersects(segment<Index> s1,segment<Index> s2,const loop_point<Index,Coord
 
     long_t d = static_cast<long_t>(x1-x2)*(y3-y4) - static_cast<long_t>(y1-y2)*(x3-x4);
     if(d == 0) return false;
+
+    // connected lines do not count as intersecting
+    if(s1.a == s2.a || s1.a == s2.b || s1.b == s2.a || s1.b == s2.b) return false;
 
     long_t t_i = static_cast<long_t>(x1-x3)*(y3-y4) - static_cast<long_t>(y1-y3)*(x3-x4);
     long_t u_i = static_cast<long_t>(x1-x3)*(y1-y2) - static_cast<long_t>(y1-y3)*(x1-x2);
@@ -515,6 +548,24 @@ bool intersects(segment<Index> s1,segment<Index> s2,const loop_point<Index,Coord
     return at_edge[0] == EDGE_NO || at_edge[1] == EDGE_NO;
 }
 
+template<typename Coord>
+bool lower_angle(point_t<Coord> ds,point_t<Coord> dp,bool tie_breaker) {
+    auto v = static_cast<long_coord_t<Coord>>(ds.y())*dp.x();
+    auto w = static_cast<long_coord_t<Coord>>(dp.y())*ds.x();
+    return v < w || (v == w && tie_breaker);
+}
+
+template<typename Coord>
+bool vert_overlap(point_t<Coord> sa,point_t<Coord> sb,point_t<Coord> p,point_t<Coord> dp,bool tie_breaker) {
+    Coord ya = sa.y();
+    Coord yb = sb.y();
+    if(ya > yb) std::swap(ya,yb);
+    return
+        tie_breaker &&
+        dp.x() == 0 &&
+        (p.y() == (dp.y() > 0 ? ya : yb));
+}
+
 /* Determine if a ray at point 'p' intersects with line segment 'sa-sb'. The ray
 is vertical and extends toward negative infinity.
 
@@ -534,20 +585,22 @@ template<typename Coord> bool line_segment_up_ray_intersection(
     point_t<Coord> sb,
     point_t<Coord> p,
     Coord hsign,
-    point_t<Coord> dp)
+    point_t<Coord> dp,
+    bool tie_breaker)
 {
     using long_t = long_coord_t<Coord>;
 
-    POLY_OPS_ASSERT(sa.x() < sb.x());
+    POLY_OPS_ASSERT(sa.x() <= sb.x());
+
+    point_t<Coord> ds = sb - sa;
+    if(ds.x() == 0) return vert_overlap(sa,sb,p,dp,tie_breaker);
 
     if(p.x() < sa.x() || (p.x() == sa.x() && hsign < 0)) return false;
     if(p.x() > sb.x() || (p.x() == sb.x() && hsign > 0)) return false;
-    point_t<Coord> ds = sb - sa;
+
     long_t t = static_cast<long_t>(p.x()-sa.x())*ds.y();
     long_t u = static_cast<long_t>(p.y()-sa.y())*ds.x();
-    if(t > u || (t == u && static_cast<long_t>(ds.y())*dp.x() > static_cast<long_t>(dp.y())*ds.x())) return false;
-
-    return true;
+    return t < u || (t == u && lower_angle(ds,dp,tie_breaker));
 }
 
 /* Determine if a ray at point 'p' intersects with line segment 'sa-sb'. The ray
@@ -562,27 +615,32 @@ template<typename Coord> std::tuple<bool,bool> dual_line_segment_up_ray_intersec
     point_t<Coord> p,
     Coord hsign1,
     point_t<Coord> dp1,
+    bool tie_breaker1,
     Coord hsign2,
-    point_t<Coord> dp2)
+    point_t<Coord> dp2,
+    bool tie_breaker2)
 {
     using long_t = long_coord_t<Coord>;
 
-    POLY_OPS_ASSERT(sa.x() < sb.x());
+    POLY_OPS_ASSERT(sa.x() <= sb.x());
+
+    point_t<Coord> ds = sb - sa;
+    if(ds.x() == 0) return {
+        vert_overlap(sa,sb,p,dp1,tie_breaker1),
+        vert_overlap(sa,sb,p,dp2,tie_breaker2)};
+
     if(p.x() < sa.x() || p.x() > sb.x()) return {false,false};
 
     std::tuple r(true,true);
     if(p.x() == sa.x()) r = {hsign1 > 0,hsign2 > 0};
     else if(p.x() == sb.x()) r = {hsign1 < 0,hsign2 < 0};
 
-    point_t<Coord> ds = sb - sa;
     long_t t = static_cast<long_t>(p.x()-sa.x())*ds.y();
     long_t u = static_cast<long_t>(p.y()-sa.y())*ds.x();
     if(t > u) return {false,false};
     if(t == u) {
-        std::get<0>(r) = std::get<0>(r) && (static_cast<long_t>(ds.y())*dp1.x()
-                <= static_cast<long_t>(dp1.y())*ds.x());
-        std::get<1>(r) = std::get<1>(r) && (static_cast<long_t>(ds.y())*dp2.x()
-                <= static_cast<long_t>(dp2.y())*ds.x());
+        std::get<0>(r) = std::get<0>(r) && lower_angle(ds,dp1,tie_breaker1);
+        std::get<1>(r) = std::get<1>(r) && lower_angle(ds,dp2,tie_breaker2);
     }
 
     return r;
@@ -644,13 +702,20 @@ public:
 
     DEBUG_STEP_BY_STEP_LB_CHECK_RET_TYPE check(segment<Index> s) {
         POLY_OPS_ASSERT(s.a_x(points) <= s.b_x(points));
-        if(s.a_x(points) == s.b_x(points)) return DEBUG_STEP_BY_STEP_LB_CHECK_FF;
+        //if(s.a_x(points) == s.b_x(points)) return DEBUG_STEP_BY_STEP_LB_CHECK_FF;
 
         bool a_is_main = s.a_is_main(points);
 
         // is s the line at p1?
-        if(a_is_main ? s.a == p1 : s.b == p1) {
-            if(line_segment_up_ray_intersection(points[s.a].data,points[s.b].data,points[p1].data,hsign2,dp2)) {
+        if((a_is_main ? s.a : s.b) == p1) {
+            if(line_segment_up_ray_intersection(
+                points[s.a].data,
+                points[s.b].data,
+                points[p1].data,
+                hsign2,
+                dp2,
+                (a_is_main ? s.a : s.b) > p2))
+            {
                 wn2 += a_is_main ? 1 : -1;
                 DEBUG_STEP_BY_STEP_LB_CHECK_RETURN(false,true);
             }
@@ -658,8 +723,15 @@ public:
         }
 
         // is s the line at p2?
-        if(a_is_main ? s.a == p2 : s.b == p2) {
-            if(line_segment_up_ray_intersection(points[s.a].data,points[s.b].data,points[p1].data,hsign1,dp1)) {
+        if((a_is_main ? s.a : s.b) == p2) {
+            if(line_segment_up_ray_intersection(
+                points[s.a].data,
+                points[s.b].data,
+                points[p1].data,
+                hsign1,
+                dp1,
+                (a_is_main ? s.a : s.b) > p1))
+            {
                 wn1 += a_is_main ? 1 : -1;
                 DEBUG_STEP_BY_STEP_LB_CHECK_RETURN(true,false);
             }
@@ -672,17 +744,19 @@ public:
             points[p1].data,
             hsign1,
             dp1,
+            (a_is_main ? s.a : s.b) > p1,
             hsign2,
-            dp2);
+            dp2,
+            (a_is_main ? s.a : s.b) > p2);
         if(intr1) wn1 += a_is_main ? 1 : -1;
         if(intr2) wn2 += a_is_main ? 1 : -1;
 
         POLY_OPS_ASSERT_SLOW(
             intr1 == line_segment_up_ray_intersection(
-                points[s.a].data,points[s.b].data,points[p1].data,hsign1,dp1));
+                points[s.a].data,points[s.b].data,points[p1].data,hsign1,dp1,(a_is_main ? s.a : s.b) > p1));
         POLY_OPS_ASSERT_SLOW(
             intr2 == line_segment_up_ray_intersection(
-                points[s.a].data,points[s.b].data,points[p1].data,hsign2,dp2));
+                points[s.a].data,points[s.b].data,points[p1].data,hsign2,dp2,(a_is_main ? s.a : s.b) > p2));
         DEBUG_STEP_BY_STEP_LB_CHECK_RETURN(intr1,intr2);
     }
 
@@ -708,6 +782,22 @@ template<typename Index,typename Coord>
 void add_event(events_t<Index,Coord> &events,Index sa,Index sb,event_type_t t) {
     events.emplace(segment<Index>{sa,sb},t);
 }
+template<typename Index>
+void add_event(std::pmr::vector<event<Index>> &events,Index sa,Index sb,event_type_t t) {
+    events.emplace_back(segment<Index>{sa,sb},t);
+}
+
+template<typename Index,typename Coord,typename Events>
+void add_fb_events(std::pmr::vector<loop_point<Index,Coord>> &points,Events &events,Index sa,Index sb) {
+    auto f = event_type_t::forward;
+    auto b = event_type_t::backward;
+    if(points[sa].data[0] == points[sb].data[0]) {
+        f = event_type_t::vforward;
+        b = event_type_t::vbackward;
+    }
+    add_event(events,sa,sb,f);
+    add_event(events,sb,sa,b);
+}
 
 /* Line segments are ordered by whether they are "above" other segments or not.
 Given two line segments, we take the segment whose start X coordinate is the
@@ -718,7 +808,7 @@ both lines have the same start point, the third point of the triangle is the
 second point of the second line instead.
 
 This only produces a consistent order if all the lines start before any
-intersection point.
+intersection point among those lines.
 */
 template<typename Index,typename Coord> struct sweep_cmp {
     std::pmr::vector<loop_point<Index,Coord>> &lpoints;
@@ -794,7 +884,11 @@ Index split_segment(
     sweep.erase(s);
 
     if(at_edge != EDGE_NO) {
-        add_event(events,sa,sb,event_type_t::forward);
+        add_event(
+            events,
+            sa,
+            sb,
+            points[sa].data[0] == points[sb].data[0] ? event_type_t::forward : event_type_t::vforward);
         return at_edge == EDGE_START ? sa : sb;
     }
 
@@ -804,16 +898,15 @@ Index split_segment(
     points.emplace_back(c,new_set,sb,loop_point<Index,Coord>::UNDEF_LINE_BAL);
     POLY_OPS_ASSERT_SLOW(check_integrity(points,sweep));
 
+    /* even if the original line was not vertical, one of the new lines might
+    still be vertical after rounding, so the comparisons done by "add_fb_events"
+    cannot be consolidated */
     if(points[sa].data[0] <= points[sb].data[0]) {
-        add_event(events,sa,points[sa].next,event_type_t::forward);
-        add_event(events,points[sa].next,sa,event_type_t::backward);
-        add_event(events,points[sa].next,sb,event_type_t::forward);
-        add_event(events,sb,points[sa].next,event_type_t::backward);
+        add_fb_events(points,events,sa,points[sa].next);
+        add_fb_events(points,events,points[sa].next,sb);
     } else {
-        add_event(events,sb,points[sa].next,event_type_t::forward);
-        add_event(events,sa,points[sa].next,event_type_t::backward);
-        add_event(events,points[sa].next,sa,event_type_t::forward);
-        add_event(events,points[sa].next,sb,event_type_t::backward);
+        add_fb_events(points,events,sb,points[sa].next);
+        add_fb_events(points,events,points[sa].next,sa);
     }
 
     return points[sa].next;
@@ -1037,6 +1130,7 @@ bool intersects_any(segment<Index> s1,const sweep_t<Index,Coord> &sweep,const lo
         point_t<Coord> intr;
         at_edge_t at_edge[2];
         if(intersects(s1,s2,points,intr,at_edge)) {
+            DEBUG_STEP_BY_STEP_MISSED_INTR;
             return true;
         }
     }
@@ -1065,17 +1159,22 @@ std::pmr::vector<Index> self_intersection(
         Index j2 = lpoints[i].next;
 
         if(lpoints[j1].data[0] > lpoints[j2].data[0]) std::swap(j1,j2);
-        lines.emplace_back(segment<Index>{j1,j2},event_type_t::forward);
-        lines.emplace_back(segment<Index>{j2,j1},event_type_t::backward);
+        add_fb_events(lpoints,lines,j1,j2);
     }
 
     events_t<Index,Coord> events(event_cmp<Index,Coord>{lpoints},std::move(lines));
     sweep_t<Index,Coord> sweep(sweep_cmp<Index,Coord>{lpoints},discrete_mem);
 
-    /* An intersection can be found as we are removing lines from 'sweep', which
-    could require testing the "line balance" on lines we already removed, thus
-    removed lines are added to "sweep_removed" and kept until we advance to a
-    point with a greater X coordinate. */
+    /* The sweep sorting functor requires that removing line segments has a
+    higher priority than adding them, however, when encountering an intersection
+    to test the line-balance on, when need to consider lines on both sides of
+    the intersection point, thus removed lines are added to "sweep_removed" and
+    kept until we advance to a point with a greater X coordinate.
+
+    An alternative to consider would be to split calc_balance into two events
+    with different priorities. It would simplify the code but would require
+    testing line intersections twice with lines that don't start or stop at the
+    intersection's X coordinate. */
     Coord last_x = std::numeric_limits<Coord>::lowest();
     std::pmr::vector<segment<Index>> sweep_removed(contig_mem);
 
@@ -1083,11 +1182,13 @@ std::pmr::vector<Index> self_intersection(
     to right, of each line segment. If the point is on the left side of the
     segment, the segment is added to "sweep". If the point is on the right, the
     segment is removed from "sweep". In the case of vertical lines, left and
-    right are chosen arbitrarily. Adding to "sweep" always takes priority.
+    right are chosen arbitrarily. Adding to "sweep" always takes priority for
+    vertical lines, otherwise removing takes priority.
 
     In the Bentley–Ottmann algorithm, we also have to swap the order of lines in
     "sweep" as we pass intersection points, but here we split lines at
-    intersection points and create new FORWARD and BACKWARD events instead. */
+    intersection points and create new "forward" and "backward" events instead.
+    */
     while(!events.empty()) {
         event<Index> e = events.top();
         events.pop();
@@ -1103,6 +1204,7 @@ std::pmr::vector<Index> self_intersection(
 
         switch(e.type) {
         case event_type_t::forward:
+        case event_type_t::vforward:
             {
                 auto itr = std::get<0>(sweep.insert(e.ab));
 
@@ -1114,6 +1216,7 @@ std::pmr::vector<Index> self_intersection(
             }
             break;
         case event_type_t::backward:
+        case event_type_t::vbackward:
             {
                 auto itr = sweep.find(e.line_ba());
 
@@ -1309,7 +1412,9 @@ void normalize_polygons(
     where all the points have a line balance of 0 */
     for(auto intr : broken_ends) {
         auto &os = broken_starts[lpoints[lpoints[intr].next].data];
+
         POLY_OPS_ASSERT(os.size());
+
         merge_original_sets<Index,Coord>(lpoints.data(),original_sets,lpoints[intr].next,os.back());
         lpoints[intr].next = os.back();
         os.pop_back();
@@ -1436,5 +1541,9 @@ struct basic_polygon {
 
 #undef DEBUG_STEP_BY_STEP_EVENT_F
 #undef DEBUG_STEP_BY_STEP_EVENT_B
+#undef DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE
+#undef DEBUG_STEP_BY_STEP_LB_CHECK_RET_TYPE
+#undef DEBUG_STEP_BY_STEP_LB_CHECK_RETURN
+#undef DEBUG_STEP_BY_STEP_LB_CHECK_FF
 
 #endif

@@ -56,7 +56,7 @@ body {
     display: inline-block;
     margin: 0.5em;
 }
-#graphicsctrl button {
+.zoomctrl button {
     all: inherit;
     display: inline-block;
     font-weight: bold;
@@ -71,20 +71,20 @@ body {
     cursor: default;
     user-select: none;
 }
-#graphicsctrl button:hover {
+.zoomctrl button:hover {
     background-color: blue;
 }
-#graphicsctrl button:active:hover {
+.zoomctrl button:active:hover {
     background-color: orange;
 }
-#graphicsctrl button:disabled {
+.zoomctrl button:disabled {
     background-color: grey;
 }
-#graphicsctrl button:focus {
+.zoomctrl button:focus {
     outline: 2px solid white;
     outline-offset: -3px;
 }
-#graphicsctrl input {
+.zoomctrl input {
     border: 1px solid black;
     border-radius: 0.75em;
     padding: 0.25em;
@@ -92,6 +92,7 @@ body {
     box-sizing: content-box;
     text-align: center;
 }
+/*#exportAnchor { display: none; }*/
 svg {
     display: block;
     min-height: 200px;

@@ -31,7 +31,7 @@
 #define DEBUG_STEP_BY_STEP_EVENT_B if(graphical_debug) { \
     { \
         auto out = mc__->console_line_stream(); \
-        out << "event: BACKWARD at " << e.ab.a << "  x: " << e.ab.a_x(lpoints); \
+        out << "event: BACKWARD at " << e.line_ba() << "  x: " << e.ab.a_x(lpoints); \
         emit_line_before_after(out, \
             (itr == sweep.begin() ? sweep.end() : std::prev(itr)), \
             itr, \
@@ -54,7 +54,9 @@
         if(a) hits1.push_back(i); \
         if(b) hits2.push_back(i); \
     } \
-    std::tie(lpoints[e.ab.a].line_bal,lpoints[e.ab.b].line_bal) = lb.result(); \
+    std::tie( \
+        lpoints[e.ab.a].line_bal, \
+        lpoints[e.ab.b].line_bal) = lb.result(); \
     report_hits(e.ab.a,hits1,std::get<0>(lb.result())); \
     report_hits(e.ab.b,hits2,std::get<1>(lb.result())); \
     break; \
@@ -64,14 +66,7 @@
 #define DEBUG_STEP_BY_STEP_LB_CHECK_RETURN(A,B) return {A,B}
 #define DEBUG_STEP_BY_STEP_LB_CHECK_FF {false,false}
 
-#define DEBUG_STEP_BY_STEP_SELF_INTERSECTION_8 do { \
-    mc__->console_line_stream() << "event: CALC_BALANCE at " << e.ab.a \
-        << " - " << lpoints[e.ab.a].next << "  x: " << e.ab.a_x(lpoints); \
-    delegate_drawing(lpoints,sweep,e,original_sets); } while(false)
-
-#define DEBUG_STEP_BY_STEP_SELF_INTERSECTION_9 \
-    mc__->console_line_stream() << "line balance of " << e.ab.a << " - " \
-        << lpoints[e.ab.a].next << " is " << lpoints[e.ab.a].line_bal
+#define DEBUG_STEP_BY_STEP_MISSED_INTR report_missed_intr(s1,s2)
 #endif // DEBUG_STEP_BY_STEP
 
 typedef int32_t coord_t;
@@ -110,6 +105,7 @@ template<typename T> struct _pp;
 template<typename T> _pp<T> pp(T &&x,unsigned int indent=0);
 
 void report_hits(index_t index,const std::vector<index_t> &hits,int balance);
+void report_missed_intr(poly_ops::detail::segment<index_t> s1,poly_ops::detail::segment<index_t> s2);
 
 #include "poly_ops.hpp"
 #include "stream_output.hpp"
@@ -170,6 +166,13 @@ void report_hits(index_t index,const std::vector<index_t> &hits,int balance) {
         attr("balance") = balance));
 }
 
+void report_missed_intr(detail::segment<index_t> s1,detail::segment<index_t> s2) {
+    if(graphical_debug) {
+        auto out = mc__->console_line_stream();
+        out << s1 << " and " << s2 << " intersect";
+    }
+}
+
 struct draw_point {
     point_t<coord_t> data;
     index_t next;
@@ -220,6 +223,9 @@ template<typename Sweep,typename OSet> void delegate_drawing(
         draw_point::state state = draw_point::NORMAL;
         if(sweep.count(detail::segment<index_t>(i,lpoints[i].next)) || sweep.count(detail::segment<index_t>(lpoints[i].next,i))) {
             state = draw_point::SWEEP;
+        } else if(lpoints[i].line_bal != detail::loop_point<index_t,coord_t>::UNDEF_LINE_BAL) {
+            if(lpoints[i].line_bal < 0) state = draw_point::INVERTED;
+            else if(lpoints[i].line_bal > 0) state = draw_point::NESTED;
         }
 
         draw_lines[i] = {lpoints[i].data,lpoints[i].next,state};

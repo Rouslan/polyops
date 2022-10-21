@@ -12,12 +12,16 @@
   <div id="hgroup">
     <div id="graphics">
       <div id="graphicsctrl">
-        <div>
+        <div class="zoomctrl">
           <button id="bZoomIn" type="button">+</button>
           <input id="zoomValue" type="text" size="5" inputmode="number" enterkeyhint="done">
           <button id="bZoomOut" type="button">&minus;</button>
         </div>
         <div><label><input type="checkbox" id="showvlabeltoggle" checked>Show labels</label></div>
+        <div>
+            <button id="bExport" type="button">Export</button>
+            <a id="exportAnchor" href="" download="out.svg">export</a>
+        </div>
       </div>
       <svg viewBox="0 0 200 200"></svg>
     </div>
@@ -33,7 +37,12 @@
   <div id="statusbar">&nbsp;</div>
   <script type="module">
     import initInterface from '/common.js';
+    import initExport from '/savesvg.js';
     initInterface(document);
+    initExport(
+        document.getElementsByTagName('svg')[0],
+        document.getElementById('bExport'),
+        document.getElementById('exportAnchor'));
   </script>
 </body>
 </html>

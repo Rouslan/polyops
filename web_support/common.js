@@ -145,7 +145,9 @@ export default function (doc,inputCoords=null) {
     if(style === null) throw Error('failed to find ".scaleinvariant" rule');
 
     function handleSVGSize() {
-        invViewTransform = svg.getScreenCTM().inverse();
+        const ctm = svg.getScreenCTM();
+        if(ctm === null) return;
+        invViewTransform = ctm.inverse();
         style.setProperty(
             'transform',
             `scale(${invViewTransform.a},${invViewTransform.d})`);
