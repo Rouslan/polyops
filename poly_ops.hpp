@@ -462,6 +462,7 @@ enum class event_type_t {vforward,backward,forward,vbackward,calc_balance};
 template<typename Index> struct event {
     segment<Index> ab;
     event_type_t type;
+    bool deleted;
     segment<Index> line_ba() const { return {ab.b,ab.a}; }
 };
 
@@ -765,39 +766,159 @@ public:
 
 /* order events by the X coordinates increasing and then by event type */
 template<typename Index,typename Coord> struct event_cmp {
-    std::pmr::vector<loop_point<Index,Coord>> &lpoints;
+    const std::pmr::vector<loop_point<Index,Coord>> &lpoints;
 
     bool operator()(const event<Index> &l1,const event<Index> &l2) const {
-        auto r = l1.ab.a_x(lpoints) - l2.ab.a_x(lpoints);
-        if(r) return r > 0;
-
-        return l1.type > l2.type;
+        if(l1.ab.a_x(lpoints) != l2.ab.a_x(lpoints))
+            return l1.ab.a_x(lpoints) < l2.ab.a_x(lpoints);
+        if(l1.type != l2.type) return l1.type < l2.type;
+        if(l1.ab.a != l2.ab.a) return l1.ab.a < l2.ab.a;
+        return l1.ab.b < l2.ab.b;
     }
 };
 
-template<typename Index,typename Coord>
-using events_t = std::priority_queue<event<Index>,std::pmr::vector<event<Index>>,event_cmp<Index,Coord>>;
+template<typename Index,typename Coord> class events_t {
+    using points_ref = const std::pmr::vector<loop_point<Index,Coord>> &;
+    using cmp = event_cmp<Index,Coord>;
 
-template<typename Index,typename Coord>
-void add_event(events_t<Index,Coord> &events,Index sa,Index sb,event_type_t t) {
-    events.emplace(segment<Index>{sa,sb},t);
-}
-template<typename Index>
-void add_event(std::pmr::vector<event<Index>> &events,Index sa,Index sb,event_type_t t) {
-    events.emplace_back(segment<Index>{sa,sb},t);
-}
+    struct to_insert {
+        event<Index> e;
+        size_t i;
+    };
 
-template<typename Index,typename Coord,typename Events>
-void add_fb_events(std::pmr::vector<loop_point<Index,Coord>> &points,Events &events,Index sa,Index sb) {
-    auto f = event_type_t::forward;
-    auto b = event_type_t::backward;
-    if(points[sa].data[0] == points[sb].data[0]) {
-        f = event_type_t::vforward;
-        b = event_type_t::vbackward;
+    std::pmr::vector<event<Index>> events;
+    std::pmr::vector<to_insert> new_events;
+    std::size_t current_i;
+    std::size_t last_size;
+
+    void incorporate_new(points_ref points) {
+        std::size_t new_count = events.size() - last_size;
+        for(std::size_t i=new_count, j=events.size()-1; i>0; --i) {
+            while(j > new_events[i-1].i) {
+                events[j] = std::move(events[j-i]);
+                --j;
+            }
+            events[j--] = std::move(new_events[i-1].e);
+        }
+        POLY_OPS_ASSERT_SLOW(std::ranges::is_sorted(events,cmp{points}));
+
+        new_events.resize(0);
+        last_size = events.size();
     }
-    add_event(events,sa,sb,f);
-    add_event(events,sb,sa,b);
-}
+
+public:
+    events_t(std::pmr::memory_resource *contig_mem)
+        : events(contig_mem), new_events(contig_mem), current_i(-1), last_size(0) {}
+
+    event<Index> &operator[](std::size_t i) { return events[i]; }
+    const event<Index> &operator[](std::size_t i) const { return events[i]; }
+
+    event<Index> &find(points_ref points,const segment<Index> s,event_type_t type,std::size_t upto) {
+        auto itr = std::lower_bound(
+            events.begin(),
+            events.begin()+upto,
+            event<Index>{s,type,false},
+            cmp{points});
+        POLY_OPS_ASSERT(itr != (events.begin()+last_size) && itr->ab == s && itr->type == type);
+        return *itr;
+    }
+
+    event<Index> &find(points_ref points,const segment<Index> s,event_type_t type) {
+        return find(points,s,type,last_size);
+    }
+
+    bool more() const {
+        return current_i < events.size();
+    }
+
+    std::tuple<event<Index>,bool> next(points_ref points) {
+        POLY_OPS_ASSERT(current_i < events.size());
+
+        if(!new_events.empty()) {
+            if(current_i >= new_events[0].i) return {events[--current_i],false};
+
+            incorporate_new(points);
+        } else if(events.size() > last_size) {
+            if(last_size == 0) {
+                std::ranges::sort(events,cmp{points});
+                last_size = events.size();
+            } else {
+                /* if there are new items at the end, move them to their sorted
+                position */
+                std::size_t new_count = events.size() - last_size;
+                new_events.resize(new_count);
+                for(std::size_t i=0; i<new_count; ++i) {
+                    new_events[i].e = std::move(events[last_size+i]);
+                    new_events[i].i = std::lower_bound(
+                        events.begin(),
+                        events.begin()+last_size,
+                        new_events[i].e,
+                        cmp{points}) - events.begin();
+                }
+                std::ranges::sort(
+                    new_events,
+                    [&](const to_insert &a,const to_insert &b) {
+                        if(a.i != b.i) return a.i < b.i;
+                        return cmp{points}(a.e,b.e);
+                    });
+                for(std::size_t i=0; i<new_count; ++i) new_events[i].i += i;
+
+                if(new_events[0].i <= current_i) return {current(),false};
+
+                incorporate_new(points);
+            }
+        }
+
+        return {events[++current_i],true};
+    }
+
+    void add_event(Index sa,Index sb,event_type_t t) {
+        events.emplace_back(segment<Index>{sa,sb},t,false);
+    }
+
+    void add_fb_events(points_ref points,Index sa,Index sb) {
+        auto f = event_type_t::forward;
+        auto b = event_type_t::backward;
+        if(points[sa].data[0] == points[sb].data[0]) {
+            f = event_type_t::vforward;
+            b = event_type_t::vbackward;
+        }
+        add_event(sa,sb,f);
+        add_event(sb,sa,b);
+    }
+
+    void reserve(size_t amount) {
+        events.reserve(amount);
+    }
+
+    auto touching_removed(points_ref points) const {
+        Index x = current().ab.a_x(points);
+        return std::ranges::subrange(events.begin(),events.begin()+current_i)
+            | std::views::reverse
+            | std::views::filter([](const event<Index> &e) {
+                return (e.type == event_type_t::backward
+                    || e.type == event_type_t::vbackward)
+                    && !e.deleted; })
+            | std::views::take_while(
+                [x,&points](const event<Index> &e) { return x == e.ab.a_x(points); })
+            | std::views::transform([](const event<Index> &e) { return e.line_ba(); });
+    }
+
+    event<Index> &current_start(points_ref points) {
+        POLY_OPS_ASSERT(
+            current().type == event_type_t::backward
+            || current().type == event_type_t::vbackward);
+        return find(
+            points,
+            current().line_ba(),
+            current().type == event_type_t::backward ?
+                event_type_t::forward : event_type_t::vforward,
+            current_i);
+    }
+
+    event<Index> &current() { return events[current_i]; }
+    const event<Index> &current() const { return events[current_i]; }
+};
 
 /* Line segments are ordered by whether they are "above" other segments or not.
 Given two line segments, we take the segment whose start X coordinate is the
@@ -811,7 +932,9 @@ This only produces a consistent order if all the lines start before any
 intersection point among those lines.
 */
 template<typename Index,typename Coord> struct sweep_cmp {
-    std::pmr::vector<loop_point<Index,Coord>> &lpoints;
+    using is_transparent = void;
+
+    const std::pmr::vector<loop_point<Index,Coord>> &lpoints;
 
     auto winding(Index p1,Index p2,Index p3) const {
         return triangle_winding(lpoints[p1].data,lpoints[p2].data,lpoints[p3].data);
@@ -880,15 +1003,18 @@ Index split_segment(
     intersection point is rounded to integer coordinates. If the distance
     between the real intersection point and the edge of the line is small
     enough, but still greater than zero, that tiny nub can still affect the
-    sweep order. */
+    sweep order. TODO: is this still necessary? */
     sweep.erase(s);
+    events.find(
+        points,
+        s,
+        points[sa].data[0] == points[sb].data[0] ? event_type_t::vforward : event_type_t::forward).deleted = true;
 
     if(at_edge != EDGE_NO) {
-        add_event(
-            events,
+        events.add_event(
             sa,
             sb,
-            points[sa].data[0] == points[sb].data[0] ? event_type_t::forward : event_type_t::vforward);
+            points[sa].data[0] == points[sb].data[0] ? event_type_t::vforward : event_type_t::forward);
         return at_edge == EDGE_START ? sa : sb;
     }
 
@@ -902,11 +1028,11 @@ Index split_segment(
     still be vertical after rounding, so the comparisons done by "add_fb_events"
     cannot be consolidated */
     if(points[sa].data[0] <= points[sb].data[0]) {
-        add_fb_events(points,events,sa,points[sa].next);
-        add_fb_events(points,events,points[sa].next,sb);
+        events.add_fb_events(points,sa,points[sa].next);
+        events.add_fb_events(points,points[sa].next,sb);
     } else {
-        add_fb_events(points,events,sb,points[sa].next);
-        add_fb_events(points,events,points[sa].next,sa);
+        events.add_fb_events(points,sb,points[sa].next);
+        events.add_fb_events(points,points[sa].next,sa);
     }
 
     return points[sa].next;
@@ -938,7 +1064,7 @@ bool check_intersection(
         intrs.push_back(intr1);
         intrs.push_back(intr2);
 
-        add_event(events,intr1,intr2,event_type_t::calc_balance);
+        events.add_event(intr1,intr2,event_type_t::calc_balance);
 
         return true;
     }
@@ -1149,34 +1275,20 @@ std::pmr::vector<Index> self_intersection(
     std::pmr::memory_resource *contig_mem,
     std::pmr::memory_resource *discrete_mem)
 {
-    std::pmr::vector<event<Index>> lines(contig_mem);
+    events_t<Index,Coord> events(contig_mem);
     std::pmr::vector<Index> intrs(contig_mem);
 
-    lines.reserve(lpoints.size()*2 + 10);
+    events.reserve(lpoints.size()*2 + 10);
 
     for(Index i=0; i<lpoints.size(); ++i) {
         Index j1 = i;
         Index j2 = lpoints[i].next;
 
         if(lpoints[j1].data[0] > lpoints[j2].data[0]) std::swap(j1,j2);
-        add_fb_events(lpoints,lines,j1,j2);
+        events.add_fb_events(lpoints,j1,j2);
     }
 
-    events_t<Index,Coord> events(event_cmp<Index,Coord>{lpoints},std::move(lines));
     sweep_t<Index,Coord> sweep(sweep_cmp<Index,Coord>{lpoints},discrete_mem);
-
-    /* The sweep sorting functor requires that removing line segments has a
-    higher priority than adding them, however, when encountering an intersection
-    to test the line-balance on, when need to consider lines on both sides of
-    the intersection point, thus removed lines are added to "sweep_removed" and
-    kept until we advance to a point with a greater X coordinate.
-
-    An alternative to consider would be to split calc_balance into two events
-    with different priorities. It would simplify the code but would require
-    testing line intersections twice with lines that don't start or stop at the
-    intersection's X coordinate. */
-    Coord last_x = std::numeric_limits<Coord>::lowest();
-    std::pmr::vector<segment<Index>> sweep_removed(contig_mem);
 
     /* A sweep is done over the points. We travel from point to point from left
     to right, of each line segment. If the point is on the left side of the
@@ -1189,14 +1301,10 @@ std::pmr::vector<Index> self_intersection(
     "sweep" as we pass intersection points, but here we split lines at
     intersection points and create new "forward" and "backward" events instead.
     */
-    while(!events.empty()) {
-        event<Index> e = events.top();
-        events.pop();
+    while(events.more()) {
+        auto [e,forward] = events.next(lpoints);
 
-        if(e.ab.a_x(lpoints) > last_x) {
-            last_x = e.ab.a_x(lpoints);
-            sweep_removed.clear();
-        }
+        if(e.deleted) continue;
 
         /*POLY_OPS_ASSERT_SLOW(std::ranges::all_of(sweep,[=,&lpoints](segment<Index> s) {
             return last_x >= s.a_x(lpoints) && last_x <= s.b_x(lpoints);
@@ -1205,7 +1313,7 @@ std::pmr::vector<Index> self_intersection(
         switch(e.type) {
         case event_type_t::forward:
         case event_type_t::vforward:
-            {
+            if(forward) {
                 auto itr = std::get<0>(sweep.insert(e.ab));
 
                 DEBUG_STEP_BY_STEP_EVENT_F;
@@ -1213,16 +1321,17 @@ std::pmr::vector<Index> self_intersection(
                 if(itr != sweep.begin() && check_intersection(events,intrs,original_sets,sweep,lpoints,e.ab,*std::prev(itr))) continue;
                 ++itr;
                 if(itr != sweep.end()) check_intersection(events,intrs,original_sets,sweep,lpoints,e.ab,*itr);
+            } else {
+                sweep.erase(e.ab);
             }
             break;
         case event_type_t::backward:
         case event_type_t::vbackward:
-            {
+            if(forward) {
                 auto itr = sweep.find(e.line_ba());
 
                 // if it's not in here, the line was split and no longer exists
                 if(itr != sweep.end()) {
-                    sweep_removed.push_back(*itr);
                     itr = sweep.erase(itr);
 
                     DEBUG_STEP_BY_STEP_EVENT_B;
@@ -1232,11 +1341,15 @@ std::pmr::vector<Index> self_intersection(
                     }
 
                     POLY_OPS_ASSERT_SLOW(!intersects_any(e.line_ba(),sweep,lpoints.data()));
+                } else {
+                    events.current().deleted = true;
                 }
+            } else {
+                sweep.insert(events.current_start(lpoints).ab);
             }
             break;
         case event_type_t::calc_balance:
-            {
+            if(forward) {
                 /* This event has nothing to with the Bentley–Ottmann algorithm.
                 We need to know the "line balance" number of each line. Since
                 the line number only changes between intersections and all the
@@ -1247,7 +1360,7 @@ std::pmr::vector<Index> self_intersection(
 
                 line_balance<Index,Coord> lb{lpoints.data(),e.ab.a,e.ab.b};
                 for(const segment<Index> &s : sweep) lb.check(s);
-                for(const segment<Index> &s : sweep_removed) lb.check(s);
+                for(segment<Index> s : events.touching_removed(lpoints)) lb.check(s);
                 std::tie(
                     lpoints[e.ab.a].line_bal,
                     lpoints[e.ab.b].line_bal) = lb.result();

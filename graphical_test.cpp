@@ -2,7 +2,7 @@
 
 constexpr bool graphical_debug = true;
 
-#include graphical_test_common.hpp
+#include "graphical_test_common.hpp"
 
 
 int main(int argc,char **argv) {

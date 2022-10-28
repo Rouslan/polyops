@@ -42,13 +42,13 @@
 #define DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE if(graphical_debug) { \
     std::vector<Index> hits1, hits2; \
     line_balance<Index,Coord> lb{lpoints.data(),e.ab.a,e.ab.b}; \
-    for(const segment<Index> &s : sweep) { \
+    for(auto s : sweep) { \
         auto [a,b] = lb.check(s); \
         Index i = s.a_is_main(lpoints) ? s.a : s.b; \
         if(a) hits1.push_back(i); \
         if(b) hits2.push_back(i); \
     } \
-    for(const segment<Index> &s : sweep_removed) { \
+    for(auto s : events.touching_removed(lpoints)) { \
         auto [a,b] = lb.check(s); \
         Index i = s.a_is_main(lpoints) ? s.a : s.b; \
         if(a) hits1.push_back(i); \
@@ -244,7 +244,7 @@ template<typename Sweep,typename OSet> void delegate_drawing(
         } else if(msg == u8"dump_sweep"sv) {
             auto out = mc__->console_line_stream();
             out << "sweep items:\n";
-            for(detail::segment<index_t> s : sweep) out << "  " << s << '\n';
+            for(auto s : sweep) out << "  " << s << '\n';
         } else if(msg == u8"dump_orig_points"sv) {
             dump_original_points(lpoints,original_sets);
         } else throw std::runtime_error("unexpected command received from client");
