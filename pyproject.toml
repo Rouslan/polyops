@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools >= 61","Cython >= 0.29","packaging"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "poly_ops"
+version = "0.1"
+description = "Operations on polygons"
+readme = "py/README.rst"
+authors = [{name="Rouslan Korneychuk",email="rouslank@msn.com"}]
+keywords = ["polygon","inset","outset","geometry"]
+license = {file="LICENSE.txt"}
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "License :: OSI Approved :: MIT No Attribution License (MIT-0)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Mathematics"]
+dependencies = ['numpy']

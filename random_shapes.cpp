@@ -69,7 +69,7 @@ int main(int argc,char **argv) {
         // try a bunch until one fails, then redo it interactively
         try {
             std::vector<point_t<coord_t>> loop;
-            for(; i<10000; ++i) {
+            for(; i<1000000; ++i) {
                 std::mt19937 r_state = rand_gen;
                 try {
                     do_one(rand_gen,loop);

@@ -1,76 +1,9 @@
-/*
-The process to create the inset/outset shapes is the following:
-
-Given a shape consisting of polygons where the points of the outer wall are
-oriented clockwise and the holes are oriented counter-clockwise:
- ________________
- \              /
-  \            /
-   \          /
-    \        /
-     \      /
-      \    /
-       \  /
-        \/
-
-The lines are moved by the inset/outset magnitude.
-  \            /
-___\__________/___
-    \        /
-     \      /
-      \    /
-       \  /
-        \/
-        /\
-       /  \
-
-The ends of the lines are reconnected. For outer angles in the original polygon,
-greater than 180 degrees, the ends are joined with a single line. For outer
-angles less than 180 degrees, an arc, whose center is the original point, is
-approximated with multiple lines.
-
-Intersecting lines are then broken so that only end-points touch.
- /\            /\
-/__\__________/__\
-    \        /
-     \      /
-      \    /
-       \  /
-        \/
-        /\
-       /__\
-
-The "line balance" of each line is computed. This number is 0 if the line is
-part of normal geometry, a negative number if it's part of inverted geometry,
-and a positive number if it's part of nested geometry (neither holes nor lines
-inside holes are considered nested).
- -1/\          -1/\
-  /__\__________/__\
-      \        /
-       \      /
-       0\    /
-         \  /
-          \/
-          /\
-       -1/__\
-
-All lines that have a non-zero "line balance" are removed.
-    __________
-    \        /
-     \      /
-      \    /
-       \  /
-        \/
-
-*/
-
-#ifndef POLY_OPS_HPP
-#define POLY_OPS_HPP
+#ifndef POLY_OPS_BASE_HPP
+#define POLY_OPS_BASE_HPP
 
 #include <stdint.h>
 #include <vector>
 #include <set>
-#include <queue>
 #include <map>
 #include <tuple>
 #include <algorithm>
@@ -83,6 +16,7 @@ All lines that have a non-zero "line balance" are removed.
 #include <iterator>
 #include <ranges>
 #include <span>
+#include <type_traits>
 
 #include "mini_flat_set.hpp"
 
@@ -103,9 +37,6 @@ All lines that have a non-zero "line balance" are removed.
 #define DEBUG_STEP_BY_STEP_EVENT_F (void)0
 #define DEBUG_STEP_BY_STEP_EVENT_B (void)0
 #define DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE (void)0
-#define DEBUG_STEP_BY_STEP_LB_CHECK_RET_TYPE void
-#define DEBUG_STEP_BY_STEP_LB_CHECK_RETURN(A,B) (void)0
-#define DEBUG_STEP_BY_STEP_LB_CHECK_FF
 #define DEBUG_STEP_BY_STEP_MISSED_INTR (void)0
 #endif
 
@@ -224,11 +155,6 @@ template<typename T,typename Coord> concept point_range
 template<typename T,typename Coord> concept point_range_range
     = std::ranges::range<T> && point_range<std::ranges::range_value_t<T>,Coord>;
 
-template<typename T,typename Coord> concept polygon = requires(const T &v) {
-    { v.outer_loop() } -> point_range<Coord>;
-    { v.inner_loops() } -> point_range_range<Coord>;
-};
-
 template<typename T> struct point_t {
     T _data[2];
 
@@ -242,8 +168,8 @@ template<typename T> struct point_t {
         _data[1] = point_ops<U>::get_y(b);
     }
 
-    constexpr T &operator[](size_t i) noexcept { return _data[i]; }
-    constexpr const T &operator[](size_t i) const noexcept { return _data[i]; }
+    constexpr T &operator[](std::size_t i) noexcept { return _data[i]; }
+    constexpr const T &operator[](std::size_t i) const noexcept { return _data[i]; }
 
     constexpr T &x() noexcept { return _data[0]; }
     constexpr const T &x() const noexcept { return _data[0]; }
@@ -255,7 +181,7 @@ template<typename T> struct point_t {
     constexpr T *end() noexcept { return _data+2; }
     constexpr const T *end() const noexcept { return _data+2; }
 
-    constexpr size_t size() const noexcept { return 2; }
+    constexpr std::size_t size() const noexcept { return 2; }
     constexpr T *data() noexcept { return _data; }
     constexpr const T *data() const noexcept { return _data; }
 
@@ -395,38 +321,107 @@ constexpr point_t<real_coord_t<Coord>> perp_vector(
     return perp * (magnitude/vmag<Coord>(perp));
 }
 
+/** Point tracking common interface.
+
+Note that the destructor is not virtual, and is instead protected.
+*/
+template<typename Index> class point_tracker {
+public:
+    /** Called when intersecting lines are broken and consequently new points
+    are added.
+
+    One of "a" or "b" will refer to a new point but not necessarily both (an
+    endpoint touching the middle of another line only requires a new point for
+    the other line). The index of a new point will always be one greater than
+    the index of the last point added, thus, to know if a point is new, keep
+    track of the number of points added.
+
+    @param a The index of the intersection point of the first line.
+    @param b The index of the intersection point of the second line.
+    */
+    virtual void new_intersection(Index a,Index b) = 0;
+
+    /** Called when points are "merged".
+
+    When parts of the shape are going to be truncated, this is called on the
+    first point to be discarded as "from" and the point that follows it as "to".
+    If the next point is also to be discarded, this is called again with that
+    point along with the point after that. This is repeated until the point
+    reached is not going to be discarded, or the following point was already
+    discarded because we've circled around the entire loop.
+
+    @param from The index of the point to be discarded.
+    @param to The index of the point that follows "from".
+    */
+    virtual void point_merge(Index from,Index to) = 0;
+
+protected:
+    ~point_tracker() = default;
+};
+
+/** Point tracking interface.
+
+Note that the destructor is not virtual, and is instead protected.
+*/
+template<typename Index>
+class normalize_point_tracker : virtual public point_tracker<Index> {
+public:
+    /** Called with the initial number of points.
+
+    This wont necessarily be the same as the amount of input points given to
+    `normalize()`; consecutive duplicate points are ignored.
+
+    This is only called once and before any method of this interface (including
+    the base class's methods).
+    */
+    virtual void initial_point_count(Index count) = 0;
+
+    /** Called for every point initially added.
+
+    Every added point has an implicit index (this index is unrelated to
+    `original_i`). This method is first called when point zero is added. Every
+    subsequent call corresponds to the index that is one greater than the
+    previous call.
+
+    `original_i` is the index of the input point that the added point
+    corresponds to. The value is what the array index of the original point
+    would be if all the input points were concatinated, in order, into a single
+    array. This will be called with every point index from the input except for
+    indices of consecutive duplicate points.
+
+    This is called after `reserve()` and before any other method of this
+    interface.
+
+    @param original_i The index of the input point that this added point
+        corresponds to.
+    */
+    virtual void point_added(Index original_i) = 0;
+
+protected:
+    ~normalize_point_tracker() = default;
+};
+
 namespace detail {
-template<typename Index> using original_sets_t = mini_set_proxy_vector<Index,std::pmr::polymorphic_allocator<Index>>;
+inline constexpr int UNDEF_LINE_BAL = std::numeric_limits<int>::lowest();
 
 template<typename Index,typename Coord> struct loop_point {
     point_t<Coord> data;
-    Index original_set;
     Index next;
-
-    static const int UNDEF_LINE_BAL = std::numeric_limits<int>::lowest();
-
-    /* Represents a point that needs to be removed.
-
-    This is not a unique value; any value besides zero will be removed. */
-    static const int REMOVE_LINE_BAL = 1;
 
     int line_bal;
 
     loop_point() = default;
-    loop_point(point_t<Coord> data,Index original_set,Index next,int line_bal=UNDEF_LINE_BAL) :
-        data{data}, original_set{original_set}, next{next}, line_bal{line_bal} {}
+    loop_point(point_t<Coord> data,Index next,int line_bal=UNDEF_LINE_BAL) :
+        data{data}, next{next}, line_bal{line_bal} {}
 
     friend void swap(loop_point &a,loop_point &b) {
         using std::swap;
 
         swap(a.data,b.data);
-        swap(a.original_set,b.original_set);
         swap(a.next,b.next);
         swap(a.line_bal,b.line_bal);
     }
 };
-template<typename Index,typename Coord> const int loop_point<Index,Coord>::UNDEF_LINE_BAL;
-template<typename Index,typename Coord> const int loop_point<Index,Coord>::REMOVE_LINE_BAL;
 
 template<typename Index> struct segment {
     Index a;
@@ -457,7 +452,7 @@ coordinate as the start/end of the vertical line.
 
 The comparison functor "sweep_cmp" requires that "backward" come before
 "forward". */
-enum class event_type_t {vforward,backward,forward,vbackward,calc_balance};
+enum class event_type_t {calc_intr_sample_neg,vforward,backward,forward,vbackward,calc_balance_intr,calc_intr_sample_pos};
 
 template<typename Index> struct event {
     segment<Index> ab;
@@ -467,15 +462,15 @@ template<typename Index> struct event {
 };
 
 // This refers to a 1-dimensional edge, i.e. the start or end of a line segment
-enum at_edge_t {
-    EDGE_START = -1,
-    EDGE_NO = 0,
-    EDGE_END = 1};
+enum class at_edge_t {
+    start = -1,
+    no = 0,
+    end = 1};
 
 template<typename Coord> at_edge_t is_edge(Coord val,Coord end_val) {
-    if(val == 0) return EDGE_START;
-    if(val == end_val) return EDGE_END;
-    return EDGE_NO;
+    if(val == 0) return at_edge_t::start;
+    if(val == end_val) return at_edge_t::end;
+    return at_edge_t::no;
 }
 
 /* Check if two line segments intersect.
@@ -509,23 +504,23 @@ bool intersects(segment<Index> s1,segment<Index> s2,const loop_point<Index,Coord
     } else if(t_i > 0 || t_i < d || u_i > 0 || u_i < d) return false;
 
     if(t_i == 0) {
-        at_edge[0] = EDGE_START;
+        at_edge[0] = at_edge_t::start;
         at_edge[1] = is_edge(u_i,d);
         p[0] = x1;
         p[1] = y1;
     } else if(t_i == d) {
-        at_edge[0] = EDGE_END;
+        at_edge[0] = at_edge_t::end;
         at_edge[1] = is_edge(u_i,d);
         p[0] = x2;
         p[1] = y2;
     } else if(u_i == 0) {
-        at_edge[0] = EDGE_NO;
-        at_edge[1] = EDGE_START;
+        at_edge[0] = at_edge_t::no;
+        at_edge[1] = at_edge_t::start;
         p[0] = x3;
         p[1] = y3;
     } else if(u_i == d) {
-        at_edge[0] = EDGE_NO;
-        at_edge[1] = EDGE_END;
+        at_edge[0] = at_edge_t::no;
+        at_edge[1] = at_edge_t::end;
         p[0] = x4;
         p[1] = y4;
     } else {
@@ -534,19 +529,19 @@ bool intersects(segment<Index> s1,segment<Index> s2,const loop_point<Index,Coord
         p[0] = x1 + coord_ops<Coord>::round(t * (x2-x1));
         p[1] = y1 + coord_ops<Coord>::round(t * (y2-y1));
 
-        at_edge[0] = EDGE_NO;
-        at_edge[1] = EDGE_NO;
+        at_edge[0] = at_edge_t::no;
+        at_edge[1] = at_edge_t::no;
 
         /* the point might still fall on one of the ends after rounding back to
         integer coordinates */
-        if(p[0] == x1 && p[1] == y1) at_edge[0] = EDGE_START;
-        else if(p[0] == x2 && p[1] == y2) at_edge[0] = EDGE_END;
+        if(p[0] == x1 && p[1] == y1) at_edge[0] = at_edge_t::start;
+        else if(p[0] == x2 && p[1] == y2) at_edge[0] = at_edge_t::end;
 
-        if(p[0] == x3 && p[1] == y3) at_edge[1] = EDGE_START;
-        else if(p[0] == x4 && p[1] == y4) at_edge[1] = EDGE_END;
+        if(p[0] == x3 && p[1] == y3) at_edge[1] = at_edge_t::start;
+        else if(p[0] == x4 && p[1] == y4) at_edge[1] = at_edge_t::end;
     }
 
-    return at_edge[0] == EDGE_NO || at_edge[1] == EDGE_NO;
+    return at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no;
 }
 
 template<typename Coord>
@@ -647,13 +642,25 @@ template<typename Coord> std::tuple<bool,bool> dual_line_segment_up_ray_intersec
     return r;
 }
 
+template<typename Coord> Coord hsign_of(const point_t<Coord> &delta) {
+    auto r = delta.x() ? delta.x() : delta.y();
+    POLY_OPS_ASSERT(r != 0);
+    return r;
+}
+
+template<typename Index,typename Coord> point_t<Coord> line_delta(
+    const loop_point<Index,Coord> *points,Index p)
+{
+    return points[points[p].next].data - points[p].data;
+}
+
 /* Calculate the "line balance".
 
 The line balance is based on the idea of a winding number, except it
 applies the lines instead of points inside. A positive number means nested
 geometry, negative means inverted geometry, and zero means normal geometry
 (clockwise oriented polygons and counter-clockwise holes). */
-template<typename Index,typename Coord> class line_balance {
+template<typename Index,typename Coord> class dual_line_balance {
     /* Polygons are oriented clockwise, and holes counter-clockwise, thus for
     polygons, for every point on every line going right (towards positive
     infinity), there exists a point on the same polygon, with the same x value,
@@ -686,57 +693,57 @@ template<typename Index,typename Coord> class line_balance {
 
     const loop_point<Index,Coord> *points;
     Index p1, p2;
+    std::span<std::pmr::vector<Index>,2> intrs_tmp;
     point_t<Coord> dp1, dp2;
     Coord hsign1, hsign2;
     int wn1, wn2;
 
 public:
-    line_balance(const loop_point<Index,Coord> *points,Index p1,Index p2) :
-        points(points), p1(p1), p2(p2),
-        dp1(points[points[p1].next].data - points[p1].data),
-        dp2(points[points[p2].next].data - points[p2].data),
-        hsign1(dp1.x() ? dp1.x() : dp1.y()), hsign2(dp2.x() ? dp2.x() : dp2.y()),
+    dual_line_balance(const loop_point<Index,Coord> *points,Index p1,Index p2,std::span<std::pmr::vector<Index>,2> intrs_tmp) :
+        points(points), p1(p1), p2(p2), intrs_tmp(intrs_tmp),
+        dp1(line_delta(points,p1)), dp2(line_delta(points,p2)),
+        hsign1(hsign_of(dp1)), hsign2(hsign_of(dp2)),
         wn1(dp1.x() < 0 ? -1 : 0), wn2(dp2.x() < 0 ? -1 : 0)
     {
         POLY_OPS_ASSERT(hsign1 && hsign2 && p1 != p2 && points[p1].data == points[p2].data);
     }
 
-    DEBUG_STEP_BY_STEP_LB_CHECK_RET_TYPE check(segment<Index> s) {
+    void check(segment<Index> s) {
         POLY_OPS_ASSERT(s.a_x(points) <= s.b_x(points));
-        //if(s.a_x(points) == s.b_x(points)) return DEBUG_STEP_BY_STEP_LB_CHECK_FF;
 
         bool a_is_main = s.a_is_main(points);
+        Index main_i = a_is_main ? s.a : s.b;
 
         // is s the line at p1?
-        if((a_is_main ? s.a : s.b) == p1) {
+        if(main_i == p1) {
             if(line_segment_up_ray_intersection(
                 points[s.a].data,
                 points[s.b].data,
                 points[p1].data,
                 hsign2,
                 dp2,
-                (a_is_main ? s.a : s.b) > p2))
+                main_i > p2))
             {
                 wn2 += a_is_main ? 1 : -1;
-                DEBUG_STEP_BY_STEP_LB_CHECK_RETURN(false,true);
+                intrs_tmp[1].push_back(main_i);
             }
-            return DEBUG_STEP_BY_STEP_LB_CHECK_FF;
+            return;
         }
 
         // is s the line at p2?
-        if((a_is_main ? s.a : s.b) == p2) {
+        if(main_i == p2) {
             if(line_segment_up_ray_intersection(
                 points[s.a].data,
                 points[s.b].data,
                 points[p1].data,
                 hsign1,
                 dp1,
-                (a_is_main ? s.a : s.b) > p1))
+                main_i > p1))
             {
                 wn1 += a_is_main ? 1 : -1;
-                DEBUG_STEP_BY_STEP_LB_CHECK_RETURN(true,false);
+                intrs_tmp[0].push_back(main_i);
             }
-            return DEBUG_STEP_BY_STEP_LB_CHECK_FF;
+            return;
         }
 
         auto [intr1,intr2] = dual_line_segment_up_ray_intersection(
@@ -745,23 +752,71 @@ public:
             points[p1].data,
             hsign1,
             dp1,
-            (a_is_main ? s.a : s.b) > p1,
+            main_i > p1,
             hsign2,
             dp2,
-            (a_is_main ? s.a : s.b) > p2);
-        if(intr1) wn1 += a_is_main ? 1 : -1;
-        if(intr2) wn2 += a_is_main ? 1 : -1;
+            main_i > p2);
+        if(intr1) {
+            wn1 += a_is_main ? 1 : -1;
+            intrs_tmp[0].push_back(main_i);
+        }
+        if(intr2) {
+            wn2 += a_is_main ? 1 : -1;
+            intrs_tmp[1].push_back(main_i);
+        }
 
         POLY_OPS_ASSERT_SLOW(
             intr1 == line_segment_up_ray_intersection(
-                points[s.a].data,points[s.b].data,points[p1].data,hsign1,dp1,(a_is_main ? s.a : s.b) > p1));
+                points[s.a].data,points[s.b].data,points[p1].data,hsign1,dp1,main_i > p1));
         POLY_OPS_ASSERT_SLOW(
             intr2 == line_segment_up_ray_intersection(
-                points[s.a].data,points[s.b].data,points[p1].data,hsign2,dp2,(a_is_main ? s.a : s.b) > p2));
-        DEBUG_STEP_BY_STEP_LB_CHECK_RETURN(intr1,intr2);
+                points[s.a].data,points[s.b].data,points[p1].data,hsign2,dp2,main_i > p2));
     }
 
     std::tuple<int,int> result() const { return {wn1,wn2}; }
+};
+
+/* Find intersections with a vertical ray extending to negative infinity.
+
+This is similar to "dual_line_balance" except it only tests a line with one
+origin point.
+*/
+template<typename Index,typename Coord> class line_ray_intersections {
+    const loop_point<Index,Coord> *points;
+    Index p1;
+    std::pmr::vector<Index> &intrs_tmp;
+    point_t<Coord> dp1;
+    Coord hsign;
+
+public:
+    line_ray_intersections(const loop_point<Index,Coord> *points,Index p1,std::pmr::vector<Index> &intrs_tmp) :
+        points(points), p1(p1), intrs_tmp(intrs_tmp),
+        dp1(points[points[p1].next].data - points[p1].data),
+        hsign(dp1.x() ? dp1.x() : dp1.y())
+    {
+        POLY_OPS_ASSERT(hsign);
+    }
+
+    void check(segment<Index> s) {
+        POLY_OPS_ASSERT(s.a_x(points) <= s.b_x(points));
+
+        bool a_is_main = s.a_is_main(points);
+        Index main_i = a_is_main ? s.a : s.b;
+
+        // is s the line at p1?
+        if(main_i != p1) {
+            if(line_segment_up_ray_intersection(
+                points[s.a].data,
+                points[s.b].data,
+                points[p1].data,
+                hsign,
+                dp1,
+                main_i > p1))
+            {
+                intrs_tmp.push_back(main_i);
+            }
+        }
+    }
 };
 
 /* order events by the X coordinates increasing and then by event type */
@@ -783,7 +838,7 @@ template<typename Index,typename Coord> class events_t {
 
     struct to_insert {
         event<Index> e;
-        size_t i;
+        std::size_t i;
     };
 
     std::pmr::vector<event<Index>> events;
@@ -887,12 +942,12 @@ public:
         add_event(sb,sa,b);
     }
 
-    void reserve(size_t amount) {
+    void reserve(std::size_t amount) {
         events.reserve(amount);
     }
 
     auto touching_removed(points_ref points) const {
-        Index x = current().ab.a_x(points);
+        Coord x = current().ab.a_x(points);
         return std::ranges::subrange(events.begin(),events.begin()+current_i)
             | std::views::reverse
             | std::views::filter([](const event<Index> &e) {
@@ -932,8 +987,6 @@ This only produces a consistent order if all the lines start before any
 intersection point among those lines.
 */
 template<typename Index,typename Coord> struct sweep_cmp {
-    using is_transparent = void;
-
     const std::pmr::vector<loop_point<Index,Coord>> &lpoints;
 
     auto winding(Index p1,Index p2,Index p3) const {
@@ -969,7 +1022,6 @@ template<typename Index,typename Coord> struct sweep_cmp {
 template<typename Index,typename Coord>
 using sweep_t = std::pmr::set<segment<Index>,sweep_cmp<Index,Coord>>;
 
-#ifndef NDEBUG
 template<typename Index,typename Coord>
 bool check_integrity(
     const std::pmr::vector<loop_point<Index,Coord>> &points,
@@ -980,7 +1032,6 @@ bool check_integrity(
     }
     return true;
 }
-#endif
 
 template<typename Index,typename Coord>
 Index split_segment(
@@ -989,7 +1040,6 @@ Index split_segment(
     std::pmr::vector<loop_point<Index,Coord>> &points,
     segment<Index> s,
     const point_t<Coord> &c,
-    Index new_set,
     at_edge_t at_edge)
 {
     Index sa = s.a;
@@ -1010,18 +1060,18 @@ Index split_segment(
         s,
         points[sa].data[0] == points[sb].data[0] ? event_type_t::vforward : event_type_t::forward).deleted = true;
 
-    if(at_edge != EDGE_NO) {
+    if(at_edge != at_edge_t::no) {
         events.add_event(
             sa,
             sb,
             points[sa].data[0] == points[sb].data[0] ? event_type_t::vforward : event_type_t::forward);
-        return at_edge == EDGE_START ? sa : sb;
+        return at_edge == at_edge_t::start ? sa : sb;
     }
 
     if(!s.a_is_main(points)) std::swap(sa,sb);
 
     points[sa].next = points.size();
-    points.emplace_back(c,new_set,sb,loop_point<Index,Coord>::UNDEF_LINE_BAL);
+    points.emplace_back(c,sb,UNDEF_LINE_BAL);
     POLY_OPS_ASSERT_SLOW(check_integrity(points,sweep));
 
     /* even if the original line was not vertical, one of the new lines might
@@ -1041,30 +1091,23 @@ Index split_segment(
 template<typename Index,typename Coord>
 bool check_intersection(
     events_t<Index,Coord> &events,
-    std::pmr::vector<Index> &intrs,
-    original_sets_t<Index> &o_sets,
     sweep_t<Index,Coord> &sweep,
     std::pmr::vector<loop_point<Index,Coord>> &points,
     segment<Index> s1,
-    segment<Index> s2)
+    segment<Index> s2,
+    point_tracker<Index> *pt)
 {
     point_t<Coord> intr;
     at_edge_t at_edge[2];
     if(intersects(s1,s2,points.data(),intr,at_edge)) {
-        POLY_OPS_ASSERT(!at_edge[0] || !at_edge[1]);
+        POLY_OPS_ASSERT(at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no);
 
-        /* both instances of loop_point are treated like a single point and will
-           refer to the same set */
-        auto new_set = static_cast<Index>(o_sets.size());
-        o_sets.emplace_back();
+        Index intr1 = split_segment(events,sweep,points,s1,intr,at_edge[0]);
+        Index intr2 = split_segment(events,sweep,points,s2,intr,at_edge[1]);
 
-        Index intr1 = split_segment(events,sweep,points,s1,intr,new_set,at_edge[0]);
-        Index intr2 = split_segment(events,sweep,points,s2,intr,new_set,at_edge[1]);
+        events.add_event(intr1,intr2,event_type_t::calc_balance_intr);
 
-        intrs.push_back(intr1);
-        intrs.push_back(intr2);
-
-        events.add_event(intr1,intr2,event_type_t::calc_balance);
+        if(pt) pt->new_intersection(intr1,intr2);
 
         return true;
     }
@@ -1083,173 +1126,68 @@ template<typename T,typename Coord> concept sized_or_forward_point_range_range
     over the loops to get their sizes. */
     = std::ranges::forward_range<T> && sized_or_forward_point_range<std::ranges::range_value_t<T>,Coord>;
 
-template<typename T,typename Coord> concept sized_or_forward_polygon = requires(const T &v) {
-    { v.outer_loop() } -> sized_or_forward_point_range<Coord>;
-    { v.inner_loops() } -> sized_or_forward_point_range_range<Coord>;
-};
-
 template<typename,typename T> struct total_point_count {
     static inline size_t doit(const T&) { return 100; }
 };
 
-template<typename Coord,sized_or_forward_polygon<Coord> T> struct total_point_count<Coord,T> {
-    static size_t doit(const T &x) {
-        size_t s = std::ranges::distance(x.outer_loop());
-        for(auto &&loop : x.inner_loops()) s += std::ranges::distance(loop);
+template<typename Coord,sized_or_forward_point_range_range<Coord> T> struct total_point_count<Coord,T> {
+    static std::size_t doit(const T &x) {
+        std::size_t s = 0;
+        for(auto &&loop : x) s += std::ranges::distance(loop);
         return s;
     }
 };
 
-template<typename Index,typename Coord>
-struct offset_polygon_point {
-    std::pmr::vector<loop_point<Index,Coord>> lpoints;
-    original_sets_t<Index> original_sets;
-    real_coord_t<Coord> magnitude;
-    Coord arc_step_size;
-    Index original_index;
-    Index lfirst;
+template<typename Index>
+using intr_map_t = std::pmr::map<Index,std::pmr::vector<Index>>;
 
-    offset_polygon_point(
-        real_coord_t<Coord> magnitude,
-        Coord arc_step_size,
-        Index reserve_size,
-        std::pmr::memory_resource *contig_mem)
-        : lpoints(contig_mem), original_sets(contig_mem), magnitude(magnitude),
-          arc_step_size(arc_step_size), original_index(0)
-    {
-        lpoints.reserve(reserve_size*2 + reserve_size/3);
-        original_sets.reserve(reserve_size);
-    }
-
-    void operator()(
-        const point_t<Coord> &p1,
-        const point_t<Coord> &p2,
-        const point_t<Coord> &p3,
-        bool first,
-        bool last)
-    {
-        if(first) lfirst = static_cast<Index>(lpoints.size());
-
-        point_t<real_coord_t<Coord>> offset = perp_vector<Coord>(p1,p2,magnitude);
-        point_t<Coord> offset_point = p1 + vround<Coord>(offset);
-
-        /* Unless this point is the first point of the loop, the last
-        point was added to bridge the newly formed gap after displacing
-        the line segments. If this point is the same as the last point
-        then the two line segments connected to this point are colinear
-        (or very close) and a gap was not created, thus this point
-        should overwrite the previous, but all the fields are the same
-        so nothing needs to be done. */
-        if(first || offset_point != lpoints.back().data) {
-            lpoints.emplace_back(offset_point,original_sets.size(),lpoints.size()+1);
-        }
-        original_sets.emplace_back();
-        original_sets.back().insert(original_index);
-
-        Index next_os = last ? lpoints[lfirst].original_set : original_sets.size();
-
-        /* add a point for the new end of this line segment */
-        lpoints.emplace_back(
-            p2 + vround<Coord>(offset),
-            next_os,
-            lpoints.size()+1);
-
-        if(triangle_winding(p1,p2,p3) * std::copysign(1.0,magnitude) < 0) {
-            // it's concave so we need to approximate an arc
-
-            real_coord_t<Coord> angle = coord_ops<Coord>::pi() - vangle<Coord>(p1-p2,p3-p2);
-            Coord steps = coord_ops<Coord>::floor(magnitude * angle / arc_step_size);
-            long lsteps = std::abs(static_cast<long>(steps));
-            if(lsteps > 1) {
-                real_coord_t<Coord> s = coord_ops<Coord>::sin(angle / steps);
-                real_coord_t<Coord> c = coord_ops<Coord>::cos(angle / steps);
-
-                for(long i=1; i<lsteps; ++i) {
-                    offset = {c*offset[0] - s*offset[1],s*offset[0] + c*offset[1]};
-                    offset_point = p2 + vround<Coord>(offset);
-
-                    if(offset_point != lpoints.back().data) {
-                        lpoints.emplace_back(offset_point,next_os,lpoints.size()+1);
-                    }
-                }
-            }
-        }
-
-        if(last) {
-            if(lpoints.back().data == lpoints[lfirst].data) {
-                lpoints.pop_back();
-            }
-            lpoints.back().next = lfirst;
-        }
-
-        ++original_index;
-    }
-
-    void single_point_loop(const point_t<Coord> &) {
-        /* A size of one can be handled as a special case. The result is a
-        circle around the single point. For now, we just ignore such "loops". */
-        ++original_index;
-    }
+template<typename Index>
+struct intr_t {
+    Index p;
+    std::pmr::vector<Index> hits;
 };
 
-template<typename Index,typename Coord,std::ranges::input_range R>
-auto offset_polygon_loop(offset_polygon_point<Index,Coord> &opp,R &&loop) {
-    point_t<Coord> p1,p2,pn,pn_1,pn_2;
-    auto itr = loop.begin();
-    auto end = loop.end();
-    if(itr == end) return;
-    p1 = *itr;
-    if(++itr == end) {
-        opp.single_point_loop(p1);
-    }
-    pn_2 = p1;
-    pn_1 = p2 = *itr;
-    bool first = true;
-    while(++itr != end) {
-        pn = *itr;
-        opp(pn_2,pn_1,pn,first,false);
-        pn_2 = std::exchange(pn_1,pn);
-        first = false;
-    }
-    opp(pn_2,pn_1,p1,false,false);
-    opp(pn_1,p1,p2,false,true);
-}
-
-template<typename Index,typename Coord,std::ranges::random_access_range R>
-void offset_polygon_loop(offset_polygon_point<Index,Coord> &opp,const R &loop) {
-    Index size = std::ranges::distance(loop);
-    if(size <= 1) {
-        if(size) opp.single_point_loop(*loop.begin());
-        return;
-    }
-    for(Index i=0; i<size; ++i) opp(
-        loop.begin()[i],
-        loop.begin()[(i + 1) % size],
-        loop.begin()[(i + 2) % size],
-        i == 0,
-        i == size-1);
-}
+template<typename Index>
+using intr_array_t = std::pmr::vector<intr_t<Index>>;
 
 template<typename Index,typename Coord,typename Input>
-std::tuple<std::pmr::vector<loop_point<Index,Coord>>,original_sets_t<Index>> offset_polygon(
-    const Input &input,
-    real_coord_t<Coord> magnitude,
-    Coord arc_step_size,
-    std::pmr::memory_resource *contig_mem)
+std::tuple<std::pmr::vector<loop_point<Index,Coord>>,intr_array_t<Index>> prepare_polygon(
+    Input &&input,
+    std::pmr::memory_resource *contig_mem,
+    normalize_point_tracker<Index> *pt)
 {
-    offset_polygon_point<Index,Coord> opp(
-        magnitude,
-        arc_step_size,
-        total_point_count<Coord,Input>::doit(input),
-        contig_mem);
+    std::tuple<std::pmr::vector<loop_point<Index,Coord>>,intr_array_t<Index>> r{
+        std::pmr::vector<loop_point<Index,Coord>>{contig_mem},
+        intr_array_t<Index>{contig_mem}};
+    std::get<0>(r).reserve(total_point_count<Coord,std::remove_reference_t<Input>>::doit(input));
+    std::get<1>(r).reserve(std::ranges::size(input));
 
-    offset_polygon_loop(opp,input.outer_loop());
-    for(auto &&loop : input.inner_loops()) offset_polygon_loop(opp,loop);
+    Index original_i = 0;
 
-    return {std::move(opp.lpoints),std::move(opp.original_sets)};
+    for(auto &&loop : input) {
+        auto p_itr = std::ranges::begin(loop);
+        if(p_itr == std::ranges::end(loop)) continue;
+
+        point_t<Coord> prev = *p_itr++;
+        Index first_i = static_cast<Index>(std::get<0>(r).size());
+
+        std::get<1>(r).emplace_back(first_i,std::pmr::vector<Index>(contig_mem));
+        std::get<0>(r).emplace_back(prev,static_cast<Index>(std::get<0>(r).size()+1));
+        if(pt) pt->point_added(original_i++);
+        for(point_t<Coord> p : std::ranges::subrange(p_itr,std::ranges::end(loop))) {
+            if(p != prev) {
+                prev = p;
+                std::get<0>(r).emplace_back(p,static_cast<Index>(std::get<0>(r).size()+1));
+                if(pt) pt->point_added(original_i);
+            }
+            ++original_i;
+        }
+        std::get<0>(r).back().next = first_i;
+    }
+
+    return r;
 }
 
-#ifndef NDEBUG
 template<typename Index,typename Coord>
 bool intersects_any(segment<Index> s1,const sweep_t<Index,Coord> &sweep,const loop_point<Index,Coord> *points) {
     for(auto s2 : sweep) {
@@ -1262,21 +1200,25 @@ bool intersects_any(segment<Index> s1,const sweep_t<Index,Coord> &sweep,const lo
     }
     return false;
 }
-#endif
-
 
 /* This is a modified version of the Bentley–Ottmann algorithm. Lines are broken
    at intersections. Two end-points touching does not count as an intersection.
    */
 template<typename Index,typename Coord>
-std::pmr::vector<Index> self_intersection(
+intr_map_t<Index> self_intersection(
     std::pmr::vector<loop_point<Index,Coord>> &lpoints,
-    original_sets_t<Index> &original_sets,
+    intr_array_t<Index> &samples,
     std::pmr::memory_resource *contig_mem,
-    std::pmr::memory_resource *discrete_mem)
+    std::pmr::memory_resource *discrete_mem,
+    point_tracker<Index> *pt)
 {
     events_t<Index,Coord> events(contig_mem);
-    std::pmr::vector<Index> intrs(contig_mem);
+    intr_map_t<Index> intrs(discrete_mem);
+    std::pmr::vector<Index> intrs_tmp[2] = {
+        std::pmr::vector<Index>(contig_mem),
+        std::pmr::vector<Index>(contig_mem)};
+    intrs_tmp[0].reserve(16);
+    intrs_tmp[1].reserve(16);
 
     events.reserve(lpoints.size()*2 + 10);
 
@@ -1286,6 +1228,15 @@ std::pmr::vector<Index> self_intersection(
 
         if(lpoints[j1].data[0] > lpoints[j2].data[0]) std::swap(j1,j2);
         events.add_fb_events(lpoints,j1,j2);
+    }
+
+    for(Index i=0; i<samples.size(); ++i) {
+        Index p = samples[i].p;
+        events.add_event(
+            i,
+            p,
+            hsign_of(line_delta(lpoints.data(),p)) < 0
+                ? event_type_t::calc_intr_sample_neg : event_type_t::calc_intr_sample_pos);
     }
 
     sweep_t<Index,Coord> sweep(sweep_cmp<Index,Coord>{lpoints},discrete_mem);
@@ -1318,9 +1269,9 @@ std::pmr::vector<Index> self_intersection(
 
                 DEBUG_STEP_BY_STEP_EVENT_F;
 
-                if(itr != sweep.begin() && check_intersection(events,intrs,original_sets,sweep,lpoints,e.ab,*std::prev(itr))) continue;
+                if(itr != sweep.begin() && check_intersection(events,sweep,lpoints,e.ab,*std::prev(itr),pt)) continue;
                 ++itr;
-                if(itr != sweep.end()) check_intersection(events,intrs,original_sets,sweep,lpoints,e.ab,*itr);
+                if(itr != sweep.end()) check_intersection(events,sweep,lpoints,e.ab,*itr,pt);
             } else {
                 sweep.erase(e.ab);
             }
@@ -1337,7 +1288,7 @@ std::pmr::vector<Index> self_intersection(
                     DEBUG_STEP_BY_STEP_EVENT_B;
 
                     if(itr != sweep.end() && itr != sweep.begin()) {
-                        check_intersection(events,intrs,original_sets,sweep,lpoints,*std::prev(itr),*itr);
+                        check_intersection(events,sweep,lpoints,*std::prev(itr),*itr,pt);
                     }
 
                     POLY_OPS_ASSERT_SLOW(!intersects_any(e.line_ba(),sweep,lpoints.data()));
@@ -1348,7 +1299,7 @@ std::pmr::vector<Index> self_intersection(
                 sweep.insert(events.current_start(lpoints).ab);
             }
             break;
-        case event_type_t::calc_balance:
+        case event_type_t::calc_balance_intr:
             if(forward) {
                 /* This event has nothing to with the Bentley–Ottmann algorithm.
                 We need to know the "line balance" number of each line. Since
@@ -1356,37 +1307,44 @@ std::pmr::vector<Index> self_intersection(
                 lines form loops, we only need to compute the number for lines
                 whose first point is an intersection. */
 
-                DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE;
-
-                line_balance<Index,Coord> lb{lpoints.data(),e.ab.a,e.ab.b};
+                dual_line_balance<Index,Coord> lb{lpoints.data(),e.ab.a,e.ab.b,intrs_tmp};
                 for(const segment<Index> &s : sweep) lb.check(s);
                 for(segment<Index> s : events.touching_removed(lpoints)) lb.check(s);
                 std::tie(
                     lpoints[e.ab.a].line_bal,
                     lpoints[e.ab.b].line_bal) = lb.result();
+
+                DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE;
+
+                intrs.emplace(e.ab.a,std::pmr::vector<Index>(intrs_tmp[0],contig_mem));
+                intrs.emplace(e.ab.b,std::pmr::vector<Index>(intrs_tmp[1],contig_mem));
+                intrs_tmp[0].resize(0);
+                intrs_tmp[1].resize(0);
+            }
+            break;
+        case event_type_t::calc_intr_sample_neg:
+        case event_type_t::calc_intr_sample_pos:
+            if(forward) {
+                /* This event has nothing to with the Bentley–Ottmann algorithm.
+                Instead of assuming that all holes are completely contained by
+                outer polygons, we add one point from every loop to the list of
+                points for which we will calculate the enclosure heirarchy (the
+                other points are in "intrs"). */
+
+                line_ray_intersections<Index,Coord> li{lpoints.data(),e.ab.b,samples[e.ab.a].hits};
+                for(const segment<Index> &s : sweep) li.check(s);
+            } else {
+                samples[e.ab.a].hits.resize(0);
             }
             break;
         }
     }
 
-    std::ranges::sort(intrs);
-    intrs.resize(std::unique(intrs.begin(),intrs.end()) - intrs.begin());
     return intrs;
 }
 
 template<typename Index,typename Coord>
-void merge_original_sets(
-    loop_point<Index,Coord> *points,
-    original_sets_t<Index> &original_sets,
-    Index from,
-    Index to)
-{
-    auto &&source = original_sets[points[from].original_set];
-    original_sets[points[to].original_set].insert(source.begin(),source.end());
-}
-
-template<typename Index,typename Coord>
-using broken_starts_t = std::pmr::map<point_t<Coord>,std::vector<Index>,point_less>;
+using broken_starts_t = std::pmr::map<point_t<Coord>,std::pmr::vector<Index>,point_less>;
 
 /* Follow the points connected to the point at "intr" until another
 intersection is reached or we wrapped around. Along the way, update the
@@ -1402,18 +1360,17 @@ void follow_balance(
     Index intr,
     std::pmr::vector<Index> &broken_ends,
     broken_starts_t<Index,Coord> &broken_starts,
-    original_sets_t<Index> &original_sets)
+    point_tracker<Index> *pt)
 {
-    POLY_OPS_ASSERT((points[intr].line_bal != loop_point<Index,Coord>::UNDEF_LINE_BAL));
+    POLY_OPS_ASSERT((points[intr].line_bal != UNDEF_LINE_BAL));
     Index next = points[intr].next;
     Index prev = intr;
     while(next != intr) {
-        if(points[next].line_bal != loop_point<Index,Coord>::UNDEF_LINE_BAL) {
+        if(points[next].line_bal != UNDEF_LINE_BAL) {
             if(points[next].line_bal == 0) {
                 if(points[intr].line_bal != 0) {
                     broken_starts[points[next].data].push_back(next);
-                    merge_original_sets(points,original_sets,next,intr);
-                    points[next].original_set = points[intr].original_set;
+                    if(pt) pt->point_merge(next,intr);
                 }
             } else if(points[intr].line_bal == 0) {
                 broken_ends.push_back(prev);
@@ -1423,7 +1380,7 @@ void follow_balance(
 
         points[next].line_bal = points[intr].line_bal;
         if(points[intr].line_bal != 0) {
-            merge_original_sets(points,original_sets,next,intr);
+            if(pt) pt->point_merge(next,intr);
         }
 
         prev = next;
@@ -1436,89 +1393,153 @@ template<typename Index> struct loop_location {
     Index size;
 };
 
+template<typename Index> struct temp_polygon {
+    loop_location<Index> loop_loc;
+    std::pmr::vector<temp_polygon*> children;
+};
+
 } // namespace detail
 
+template<typename Index,typename Coord> class temp_polygon_proxy;
+
 template<typename Index,typename Coord> class proto_loop_iterator {
+    friend temp_polygon_proxy<Index,Coord>;
+
     const detail::loop_point<Index,Coord> *lpoints;
     Index i;
 
+    /* Loops have the same "i" value for "begin()" and "end()" thus a different
+    value is used to distinguish the end from other iterators. */
+    Index dist_from_end;
+
+    friend bool operator==(const proto_loop_iterator &a,const proto_loop_iterator &b) {
+        POLY_OPS_ASSERT(a.lpoints == b.lpoints);
+        return a.dist_from_end == b.dist_from_end;
+    }
+
+    friend bool operator==(const proto_loop_iterator &a,const std::default_sentinel_t&) {
+        return a.dist_from_end == 0;
+    }
+    friend bool operator==(const std::default_sentinel_t&,const proto_loop_iterator &b) {
+        return b.dist_from_end == 0;
+    }
+
+    proto_loop_iterator(const detail::loop_point<Index,Coord> *lpoints,Index i,Index dist_from_end)
+        : lpoints(lpoints), i(i), dist_from_end(dist_from_end) {}
+
 public:
-    bool operator==(const proto_loop_iterator &b) const {
-        POLY_OPS_ASSERT(lpoints == b.lpoints);
-        return i == b.it;
-    }
-
-    bool operator!=(const proto_loop_iterator &b) const {
-        POLY_OPS_ASSERT(lpoints == b.lpoints);
-        return i != b.it;
-    }
-
     proto_loop_iterator &operator++() {
-        i == lpoints[i].next;
+        i = lpoints[i].next;
+        --dist_from_end;
         return *this;
     }
 
     proto_loop_iterator operator++(int) {
-        return {lpoints,std::exchange(i,lpoints[i].next)};
+        return {lpoints,std::exchange(i,lpoints[i].next),dist_from_end--};
     }
 
-    const point_t<Coord> &operator*() const { return lpoints[i]; }
-
-    const point_t<Coord> *operator->() const { return &lpoints[i]; }
+    const point_t<Coord> &operator*() const {
+        return lpoints[i].data;
+    }
 };
 
-template<typename Index,typename Coord> class tracked_proto_loop_iterator {
+template<typename Index,typename Coord> class temp_polygon_proxy {
     const detail::loop_point<Index,Coord> *lpoints;
-    const detail::mini_flat_set<Index,std::pmr::polymorphic_allocator<Index>> *original_sets;
-    Index i;
-
+    const detail::temp_polygon<Index> &data;
 public:
-    bool operator==(const tracked_proto_loop_iterator &b) const {
-        POLY_OPS_ASSERT(lpoints == b.lpoints && original_sets == b.original_sets);
-        return i == b.it;
+    temp_polygon_proxy(
+        const detail::loop_point<Index,Coord> *lpoints,
+        const detail::temp_polygon<Index> &data)
+        : lpoints(lpoints), data(data) {}
+
+    proto_loop_iterator<Index,Coord> begin() const {
+        return {lpoints,data.loop_loc.start,data.loop_loc.size};
     }
 
-    bool operator!=(const tracked_proto_loop_iterator &b) const {
-        POLY_OPS_ASSERT(lpoints == b.lpoints && original_sets == b.original_sets);
-        return i != b.it;
-    }
+    std::default_sentinel_t end() const { return {}; }
 
-    tracked_proto_loop_iterator &operator++() {
-        i == lpoints[i].next;
-        return *this;
-    }
+    Index size() const { return data.loop_loc.size; }
 
-    tracked_proto_loop_iterator operator++(int) {
-        return {lpoints,original_sets,std::exchange(i,lpoints[i].next)};
-    }
-
-    std::tuple<const point_t<Coord>&,std::span<Index>> operator*() const {
-        return {lpoints[i],std::span(original_sets[i])};
+    auto inner_loops() const {
+        return data.children | std::views::transform(
+            [this](const detail::temp_polygon<Index> *inner){
+                return temp_polygon_proxy{lpoints,*inner};
+            });
     }
 };
+} // namespace poly_ops
 
+template<typename Index,typename Coord>
+inline constexpr bool std::ranges::enable_borrowed_range<poly_ops::temp_polygon_proxy<Index,Coord>> = true;
+
+namespace poly_ops {
 namespace detail {
 
 template<typename Index,typename Coord>
-void normalize_polygons(
+std::pmr::vector<temp_polygon<Index>> find_loops(
     std::pmr::vector<loop_point<Index,Coord>> &lpoints,
-    original_sets_t<Index> &original_sets,
-    bool has_holes,
-    std::pmr::memory_resource *contig_mem,
-    std::pmr::memory_resource *discrete_mem)
+    std::pmr::memory_resource *contig_mem)
 {
-    auto intrs = self_intersection(lpoints,original_sets,contig_mem,discrete_mem);
+    std::pmr::vector<temp_polygon<Index>> loops(contig_mem);
+    for(Index i=0; i<static_cast<Index>(lpoints.size()); ++i) {
+        if(lpoints[i].line_bal == 0) {
+            int loop_i = static_cast<int>(loops.size()+1);
+            loops.emplace_back(
+                loop_location<Index>{i,1},
+                std::pmr::vector<temp_polygon<Index>*>(contig_mem));
+
+            /* give this a non-zero value to prevent this point from being
+            scanned again */
+            lpoints[i].line_bal = loop_i;
+
+            for(Index j = lpoints[i].next; j != i; j = lpoints[j].next) {
+                POLY_OPS_ASSERT(lpoints[j].line_bal == 0);
+
+                ++loops.back().loop_loc.size;
+                lpoints[j].line_bal = loop_i;
+            }
+        }
+    }
+
+    return loops;
+}
+
+template<typename Index,typename Coord>
+void add_ordered_loop_item(
+    const std::pmr::vector<loop_point<Index,Coord>> &lpoints,
+    intr_array_t<Index> &ordered_loops,
+    Index p,
+    std::pmr::vector<Index> &&hits)
+{
+    if(lpoints[p].line_bal != UNDEF_LINE_BAL) {
+        ordered_loops.emplace_back(p,std::move(hits));
+    }
+}
+
+template<typename Index,typename Coord>
+std::tuple<std::pmr::vector<temp_polygon<Index>>,intr_map_t<Index>> normalize_polygons(
+    std::pmr::vector<loop_point<Index,Coord>> &lpoints,
+    intr_array_t<Index> &to_sample,
+    std::pmr::memory_resource *contig_mem,
+    std::pmr::memory_resource *discrete_mem,
+    point_tracker<Index> *pt)
+{
+    auto intrs = self_intersection(lpoints,to_sample,contig_mem,discrete_mem,pt);
 
     broken_starts_t<Index,Coord> broken_starts(discrete_mem);
     std::pmr::vector<Index> broken_ends(contig_mem);
 
-    for(auto intr : intrs) {
-        follow_balance<Index,Coord>(lpoints.data(),intr,broken_ends,broken_starts,original_sets);
+    for(auto intr : intrs | std::views::keys) {
+        follow_balance<Index,Coord>(lpoints.data(),intr,broken_ends,broken_starts,pt);
+    }
+    for(auto intr : to_sample) {
+        if(lpoints[intr.p].line_bal == UNDEF_LINE_BAL)
+            follow_balance<Index,Coord>(lpoints.data(),intr.p,broken_ends,broken_starts,pt);
     }
 
 #if POLY_OPS_GRAPHICAL_DEBUG
     if(mc__) mc__->console_line_stream() << "broken_starts: " << pp(broken_starts) << "\nbroken_ends: " << pp(broken_ends);
-    delegate_drawing_trimmed(lpoints,original_sets);
+    delegate_drawing_trimmed(lpoints);
 #endif
 
     /* match all the points in broken_starts and broken_ends to make new loops
@@ -1528,7 +1549,7 @@ void normalize_polygons(
 
         POLY_OPS_ASSERT(os.size());
 
-        merge_original_sets<Index,Coord>(lpoints.data(),original_sets,lpoints[intr].next,os.back());
+        if(pt) pt->point_merge(lpoints[intr].next,os.back());
         lpoints[intr].next = os.back();
         os.pop_back();
     }
@@ -1539,116 +1560,222 @@ void normalize_polygons(
         broken_starts.end(),
         [](const broken_starts_t<Index,Coord>::value_type &v) { return std::get<1>(v).empty(); }));
 
-    {
+    /*if(pt) {
+        // TODO: is this already done in the previous step?
         // merge the original point sets at common points
         std::pmr::map<point_t<Coord>,Index,point_less> by_coord(discrete_mem);
-        for(auto intr : intrs) {
+        for(auto intr : intrs | std::views::keys) {
             auto os = by_coord.find(lpoints[intr].data);
             if(os == by_coord.end()) {
-                by_coord.emplace(lpoints[intr].data,lpoints[intr].original_set);
-            } else if(os->second != lpoints[intr].original_set) {
-                original_sets[os->second].merge(original_sets[lpoints[intr].original_set]);
-                lpoints[intr].original_set = os->second;
+                by_coord.emplace(lpoints[intr].data,intr);
+            } else {
+                pt->point_merge(intr,os->second);
             }
-        }
-    }
-
-#if POLY_OPS_GRAPHICAL_DEBUG
-    delegate_drawing_trimmed(lpoints,original_sets);
-#endif
-
-    // find all the new loops
-    std::pmr::vector<loop_location<Index>> loops(contig_mem);
-    for(size_t i=0; i<lpoints.size(); ++i) {
-        if(lpoints[i].line_bal == 0) {
-            loops.emplace_back(i,1);
-
-            /* give this a non-zero value to prevent this point from being
-            scanned again */
-            lpoints[i].line_bal = 1;
-
-            for(size_t j = lpoints[i].next; j != i; j = lpoints[j].next) {
-                POLY_OPS_ASSERT(lpoints[j].line_bal == 0);
-
-                ++loops.back().size;
-                lpoints[j].line_bal = 1;
-            }
-        }
-    }
-
-    /*std::vector<std::vector<index_t>> orig_to_new;
-    orig_to_new.resize(total);
-
-    for(size_t i=0; i<lpoints.size(); ++i) {
-        if(lpoints[i].line_bal == 0) {
-            auto &orig = original_sets[lpoints[i].original_set];
-            std::copy(orig.begin(),orig.end(),orig_to_new[i].begin());
         }
     }*/
 
-    /*for_each_line(points,sizes,loop_count,[&](unsigned int j,unsigned int j2) {
-            std::cout << points[j*2] << ',' << points[j*2+1] << " - " << points[j2*2] << ',' << points[j2*2+1] << '\n';
-        });*/
+#if POLY_OPS_GRAPHICAL_DEBUG
+    delegate_drawing_trimmed(lpoints);
+#endif
 
-    //dump_loop_points(lpoints);
+    for(auto &lp : lpoints) {
+        if(lp.line_bal != 0) lp.line_bal = UNDEF_LINE_BAL;
+    }
+
+    return {find_loops<Index,Coord>(lpoints,contig_mem),std::move(intrs)};
+}
+
+template<typename Index,typename Coord>
+intr_array_t<Index> unique_sorted_loop_points(
+    const std::pmr::vector<loop_point<Index,Coord>> &lpoints,
+    intr_map_t<Index> &&intrs,
+    intr_array_t<Index> &&samples,
+    std::pmr::memory_resource *contig_mem)
+{
+    intr_array_t<Index> ordered_loops(contig_mem);
+    ordered_loops.reserve(intrs.size() + samples.size());
+    for(auto &item : intrs) add_ordered_loop_item(lpoints,ordered_loops,std::get<0>(item),std::move(std::get<1>(item)));
+    for(auto &item : samples) add_ordered_loop_item(lpoints,ordered_loops,item.p,std::move(item.hits));
+
+    auto loop_id = [&](const intr_t<Index> &item){
+        return lpoints[item.p].line_bal;
+    };
+    std::ranges::sort(ordered_loops,{},loop_id);
+    ordered_loops.resize(
+        std::ranges::begin(std::ranges::unique(ordered_loops,{},loop_id)) - ordered_loops.begin());
+
+    return ordered_loops;
+}
+
+template<typename Index,typename Coord>
+void replace_line_indices_with_loop_indices(
+    const std::pmr::vector<loop_point<Index,Coord>> &lpoints,
+    const std::pmr::vector<temp_polygon<Index>> &loops,
+    intr_array_t<Index> &ordered_loops,
+    std::pmr::memory_resource *contig_mem)
+{
+    std::pmr::vector<int> inside(loops.size(),0,contig_mem);
+    for(auto& item : ordered_loops) {
+        for(Index i : item.hits) {
+            point_t<Coord> d = lpoints[i].data - lpoints[lpoints[i].next].data;
+            inside[lpoints[i].line_bal-1]
+                += ((d.x() ? d.x() : d.y()) > 0) ? 1 : -1;
+        }
+        std::size_t inside_count = 0;
+        for(std::size_t i=0; i<inside.size(); ++i) {
+            POLY_OPS_ASSERT(inside_count < item.hits.size());
+            if(inside[i]) item.hits[inside_count++] = static_cast<Index>(i);
+        }
+        item.hits.resize(inside_count);
+        std::ranges::fill(inside,0);
+
+        item.p = static_cast<Index>(lpoints[item.p].line_bal-1);
+    }
+}
+
+template<typename Index>
+std::pmr::vector<temp_polygon<Index>*> arrange_loops(
+    const intr_array_t<Index> &ordered_loops,
+    std::pmr::vector<temp_polygon<Index>> &loops,
+    std::pmr::memory_resource *contig_mem)
+{
+    POLY_OPS_ASSERT(std::ranges::equal(
+        ordered_loops | std::views::transform([](auto &item) { return item.p; }),
+        std::ranges::iota_view<Index,Index>(0,loops.size())));
+
+    std::pmr::vector<temp_polygon<Index>*> top(contig_mem);
+
+    for(const auto& item : ordered_loops) {
+        if(item.hits.empty()) top.push_back(&loops[item.p]);
+        else {
+            for(auto outer_i : item.hits) {
+                if(ordered_loops[outer_i].hits.size() == (item.hits.size() - 1)) {
+                    loops[outer_i].children.push_back(&loops[item.p]);
+                    goto next;
+                }
+            }
+            POLY_OPS_ASSERT(false);
+          next: ;
+        }
+    }
+
+    return top;
+}
+
+template<typename Index,typename Coord>
+std::pmr::vector<temp_polygon<Index>*> loop_hierarchy(
+    std::pmr::vector<loop_point<Index,Coord>> &lpoints,
+    std::pmr::vector<temp_polygon<Index>> &loops,
+    intr_map_t<Index> &&intrs,
+    intr_array_t<Index> &&samples,
+    std::pmr::memory_resource *contig_mem)
+{
+    auto ordered_loops = unique_sorted_loop_points<Index,Coord>(lpoints,std::move(intrs),std::move(samples),contig_mem);
+    replace_line_indices_with_loop_indices<Index,Coord>(lpoints,loops,ordered_loops,contig_mem);
+    return arrange_loops<Index>(ordered_loops,loops,contig_mem);
+}
+
+template<typename Index,typename Coord> auto make_temp_polygon_tree_range(
+    std::pmr::vector<loop_point<Index,Coord>> &&lpoints,
+    std::pmr::vector<temp_polygon<Index>> &&loops,
+    std::pmr::vector<temp_polygon<Index>*> &&top)
+{
+    return std::ranges::owning_view(std::move(top))
+        | std::views::transform(
+            [lpoints=std::move(lpoints),loops=std::move(loops)]
+            (const temp_polygon<Index> *poly) {
+                return temp_polygon_proxy<Index,Coord>(lpoints.data(),*poly);
+            });
+}
+
+template<typename Index,typename Coord> auto make_temp_polygon_range(
+    std::pmr::vector<loop_point<Index,Coord>> &&lpoints,
+    std::pmr::vector<temp_polygon<Index>> &&loops)
+{
+    return std::ranges::owning_view(std::move(loops))
+        | std::views::transform(
+            [lpoints=std::move(lpoints)]
+            (const temp_polygon<Index> &poly) {
+                return temp_polygon_proxy<Index,Coord>(lpoints.data(),poly);
+            });
 }
 
 } // namespace detail
 
-template<std::integral Index,detail::coordinate Coord,polygon<Coord> Input>
-void offset_stroke_triangulate(
+template<typename Index,typename Coord>
+using temp_polygon_tree_range = decltype(
+    detail::make_temp_polygon_tree_range<Index,Coord>({},{},{}));
+
+template<typename Index,typename Coord>
+using temp_polygon_range = decltype(
+    detail::make_temp_polygon_range<Index,Coord>({},{}));
+
+namespace detail {
+template<bool TreeOut,typename Index,typename Coord>
+std::conditional_t<TreeOut,
+    temp_polygon_tree_range<Index,Coord>,
+    temp_polygon_range<Index,Coord>>
+normalize_and_package(
+    std::pmr::vector<loop_point<Index,Coord>> &&lpoints,
+    intr_array_t<Index> &&to_sample,
+    std::pmr::memory_resource *contig_mem,
+    std::pmr::memory_resource *discrete_mem,
+    point_tracker<Index> *pt)
+{
+    auto [loops,intrs] = normalize_polygons<Index,Coord>(
+        lpoints,
+        to_sample,
+        contig_mem,
+        discrete_mem,
+        pt);
+
+    if constexpr(TreeOut) {
+        auto top = loop_hierarchy(lpoints,loops,std::move(intrs),std::move(to_sample),contig_mem);
+        return make_temp_polygon_tree_range<Index,Coord>(
+            std::move(lpoints),
+            std::move(loops),
+            std::move(top));
+    } else {
+        return make_temp_polygon_range<Index,Coord>(
+            std::move(lpoints),
+            std::move(loops));
+    }
+}
+} // namespace detail
+
+template<bool TreeOut,std::integral Index,detail::coordinate Coord,point_range_range<Coord> Input>
+std::conditional_t<TreeOut,
+    temp_polygon_tree_range<Index,Coord>,
+    temp_polygon_range<Index,Coord>>
+normalize(
     Input &&input,
-    real_coord_t<Coord> magnitude,
-    Coord arc_step_size,
+    normalize_point_tracker<Index> *pt,
     std::pmr::memory_resource *contig_mem,
     std::pmr::memory_resource *discrete_mem)
 {
-    auto [lpoints,original_sets] = detail::offset_polygon<Index,Coord,Input>(input,magnitude,arc_step_size,contig_mem);
-    detail::normalize_polygons<Index,Coord>(
-        lpoints,
-        original_sets,
-        std::ranges::empty(input.inner_loops()),
+    auto [lpoints,to_sample] = detail::prepare_polygon<Index,Coord,Input>(std::forward<Input>(input),contig_mem,pt);
+    return detail::normalize_and_package<TreeOut,Index,Coord>(
+        std::move(lpoints),
+        std::move(to_sample),
         contig_mem,
-        discrete_mem);
+        discrete_mem,
+        pt);
 }
 
-template<std::integral Index,detail::coordinate Coord,polygon<Coord> Input>
-void offset_stroke_triangulate(
+template<bool TreeOut,std::integral Index,detail::coordinate Coord,point_range_range<Coord> Input>
+std::conditional_t<TreeOut,
+    temp_polygon_tree_range<Index,Coord>,
+    temp_polygon_range<Index,Coord>>
+normalize(
     Input &&input,
-    real_coord_t<Coord> magnitude,
-    Coord arc_step_size,
-    std::pmr::memory_resource *mem)
+    normalize_point_tracker<Index> *pt=nullptr,
+    std::pmr::memory_resource *contig_mem=nullptr)
 {
-    std::pmr::unsynchronized_pool_resource discrete_mem(mem);
-    offset_stroke_triangulate<Index,Coord>(std::forward<Input>(input),magnitude,arc_step_size,mem,&discrete_mem);
+    if(contig_mem == nullptr) contig_mem = std::pmr::get_default_resource();
+
+    std::pmr::unsynchronized_pool_resource dm(contig_mem);
+    return normalize<TreeOut,Index,Coord,Input>(std::forward<Input>(input),pt,contig_mem,&dm);
 }
-
-template<std::integral Index,detail::coordinate Coord,polygon<Coord> Input>
-void offset_stroke_triangulate(
-    Input &&input,
-    real_coord_t<Coord> magnitude,
-    Coord arc_step_size)
-{
-    offset_stroke_triangulate<Index,Coord>(std::forward<Input>(input),magnitude,arc_step_size,std::pmr::get_default_resource());
-}
-
-/* A basic polygon type that has all the points in a single array. The first
-loop is the outer wall and any subsequent loops are holes. */
-template<std::integral Index,detail::coordinate Coord,point<Coord> Point>
-struct basic_polygon {
-    const Point *points;
-    const std::span<const Index> ends;
-
-    auto outer_loop() const {
-        return std::span(points,points+ends[0]);
-    }
-
-    auto inner_loops() const {
-        return std::views::iota(Index(0),static_cast<Index>(ends.size()-1))
-            | std::views::transform([points=points,ends=ends](Index i){
-                return std::span(points + ends[i],points + ends[i+1]); });
-    }
-};
 
 } // namespace poly_ops
 

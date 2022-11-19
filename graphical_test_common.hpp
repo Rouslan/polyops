@@ -40,31 +40,9 @@
     delegate_drawing(lpoints,sweep,e,original_sets); } (void)0
 
 #define DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE if(graphical_debug) { \
-    std::vector<Index> hits1, hits2; \
-    line_balance<Index,Coord> lb{lpoints.data(),e.ab.a,e.ab.b}; \
-    for(auto s : sweep) { \
-        auto [a,b] = lb.check(s); \
-        Index i = s.a_is_main(lpoints) ? s.a : s.b; \
-        if(a) hits1.push_back(i); \
-        if(b) hits2.push_back(i); \
-    } \
-    for(auto s : events.touching_removed(lpoints)) { \
-        auto [a,b] = lb.check(s); \
-        Index i = s.a_is_main(lpoints) ? s.a : s.b; \
-        if(a) hits1.push_back(i); \
-        if(b) hits2.push_back(i); \
-    } \
-    std::tie( \
-        lpoints[e.ab.a].line_bal, \
-        lpoints[e.ab.b].line_bal) = lb.result(); \
-    report_hits(e.ab.a,hits1,std::get<0>(lb.result())); \
-    report_hits(e.ab.b,hits2,std::get<1>(lb.result())); \
-    break; \
+    report_hits(e.ab.a,intrs_tmp[0],std::get<0>(lb.result())); \
+    report_hits(e.ab.b,intrs_tmp[0],std::get<1>(lb.result())); \
 }
-
-#define DEBUG_STEP_BY_STEP_LB_CHECK_RET_TYPE std::tuple<bool,bool>
-#define DEBUG_STEP_BY_STEP_LB_CHECK_RETURN(A,B) return {A,B}
-#define DEBUG_STEP_BY_STEP_LB_CHECK_FF {false,false}
 
 #define DEBUG_STEP_BY_STEP_MISSED_INTR report_missed_intr(s1,s2)
 #endif // DEBUG_STEP_BY_STEP
@@ -104,7 +82,7 @@ template<typename Itr> void emit_line_before_after(std::ostream &out,Itr before,
 template<typename T> struct _pp;
 template<typename T> _pp<T> pp(T &&x,unsigned int indent=0);
 
-void report_hits(index_t index,const std::vector<index_t> &hits,int balance);
+void report_hits(index_t index,const std::pmr::vector<index_t> &hits,int balance);
 void report_missed_intr(poly_ops::detail::segment<index_t> s1,poly_ops::detail::segment<index_t> s2);
 
 #include "poly_ops.hpp"
@@ -157,7 +135,7 @@ namespace poly_ops {
     }
 }
 
-void report_hits(index_t index,const std::vector<index_t> &hits,int balance) {
+void report_hits(index_t index,const std::pmr::vector<index_t> &hits,int balance) {
     using namespace json;
     mc__->message(obj(
         attr("command") = "linebalance",
@@ -223,7 +201,7 @@ template<typename Sweep,typename OSet> void delegate_drawing(
         draw_point::state state = draw_point::NORMAL;
         if(sweep.count(detail::segment<index_t>(i,lpoints[i].next)) || sweep.count(detail::segment<index_t>(lpoints[i].next,i))) {
             state = draw_point::SWEEP;
-        } else if(lpoints[i].line_bal != detail::loop_point<index_t,coord_t>::UNDEF_LINE_BAL) {
+        } else if(lpoints[i].line_bal != detail::UNDEF_LINE_BAL) {
             if(lpoints[i].line_bal < 0) state = draw_point::INVERTED;
             else if(lpoints[i].line_bal > 0) state = draw_point::NESTED;
         }

@@ -96,6 +96,7 @@
 		<Linker>
 			<Add option="-pthread" />
 		</Linker>
+		<Unit filename="base.hpp" />
 		<Unit filename="graphical_test.cpp">
 			<Option target="Debug" />
 			<Option target="Release" />
@@ -109,6 +110,7 @@
 			<Option target="Release" />
 			<Option target="random_shapes_debug" />
 		</Unit>
+		<Unit filename="offset.hpp" />
 		<Unit filename="original.cpp">
 			<Option target="original" />
 		</Unit>
