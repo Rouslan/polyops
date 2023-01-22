@@ -100,7 +100,7 @@ public:
 
     @param minimum The amount of points that will definitely be added.
     */
-    virtual void reserve(Index minimum) {}
+    virtual void reserve(Index /*minimum*/) {}
 
     /** Called for every point initially added.
 
@@ -171,7 +171,6 @@ public:
 template<typename Index,typename Coord>
 struct offset_polygon_point {
     std::pmr::vector<loop_point<Index,Coord>> lpoints;
-    original_sets_t<Index> original_sets;
     real_coord_t<Coord> magnitude;
     Coord arc_step_size;
     Index original_index;
@@ -185,7 +184,7 @@ struct offset_polygon_point {
         Index reserve_size,
         std::pmr::memory_resource *contig_mem,
         offset_point_tracker<Index> *pt)
-        : lpoints(contig_mem), original_sets(contig_mem), magnitude(magnitude),
+        : lpoints(contig_mem), magnitude(magnitude),
           arc_step_size(arc_step_size), original_index(0), last_size(0), pt(pt)
     {
         lpoints.reserve(reserve_size*2 + reserve_size/3);
@@ -223,7 +222,7 @@ struct offset_polygon_point {
         should overwrite the previous, but all the fields are the same
         so nothing needs to be done. */
         if(first || offset_point != lpoints.back().data) {
-            lpoints.emplace_back(offset_point,original_sets.size(),lpoints.size()+1);
+            lpoints.emplace_back(offset_point,lpoints.size()+1);
         }
 
         handle_pt();
@@ -328,7 +327,7 @@ std::tuple<std::pmr::vector<loop_point<Index,Coord>>,intr_array_t<Index>> offset
     intr_array_t<Index> to_sample(contig_mem);
     to_sample.reserve(std::ranges::size(input));
 
-    for(const auto &&loop : input) {
+    for(auto &&loop : input) {
         to_sample.emplace_back(static_cast<Index>(opp.lpoints.size()),std::pmr::vector<Index>(contig_mem));
         offset_polygon_loop(opp,loop);
     }
@@ -352,7 +351,7 @@ offset(
 {
     POLY_OPS_ASSERT(contig_mem && discrete_mem);
 
-    auto [lpoints,to_sample] = detail::offset_polygon<Index,Coord,Input>(input,magnitude,arc_step_size,contig_mem,pt);
+    auto [lpoints,to_sample] = detail::offset_polygon<Index,Coord,Input>(std::forward<Input>(input),magnitude,arc_step_size,contig_mem,pt);
     return detail::normalize_and_package<TreeOut,Index,Coord>(
         std::move(lpoints),
         std::move(to_sample),
@@ -375,7 +374,7 @@ offset(
     if(contig_mem == nullptr) contig_mem = std::pmr::get_default_resource();
 
     std::pmr::unsynchronized_pool_resource dm(contig_mem);
-    return offset<TreeOut,Index,Coord,Input>(input,magnitude,arc_step_size,pt,contig_mem,&dm);
+    return offset<TreeOut,Index,Coord,Input>(std::forward<Input>(input),magnitude,arc_step_size,pt,contig_mem,&dm);
 }
 
 } // namespace poly_ops

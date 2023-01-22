@@ -9,6 +9,7 @@
 #include <tuple>
 #include <type_traits>
 #include <ostream>
+#include <optional>
 
 #if defined _WIN32 || defined __CYGWIN__
   #ifdef SERVER_CPP
@@ -38,33 +39,44 @@ namespace json {
         std::same_as<T,decltype(nullptr)>;
 
     namespace detail {
-        template<typename T> struct array { T values; };
+        template<json_value T> struct is_obj<std::optional<T>> : std::true_type {};
+
+        template<typename T> struct array {
+            T values;
+            array(T &&v) : values(std::forward<T>(v)) {}
+        };
         template<json_value... T> struct is_obj<array<std::tuple<T...>>> : std::true_type {};
 
-        template<typename T> concept has_to_json_value =
-            requires(T x) {
-                { to_json_value(x) } -> json_value;
-            };
+        template<typename T>
+        requires json_value<std::remove_reference_t<T>>
+        constexpr auto normalize(T &&x) { return x; }
 
-        template<typename T> requires json_value<std::remove_cvref_t<T>> constexpr T normalize(T &&x) { return x; }
         constexpr auto normalize(decltype(nullptr) x) { return x; }
+
         template<std::convertible_to<std::string_view> T>
         constexpr std::string_view normalize(const T &x) { return x; }
 
-        template<has_to_json_value T> constexpr auto normalize(T &&x) {
+        template<typename T>
+        constexpr auto normalize(T &&x) -> decltype(to_json_value(std::forward<T>(x))) {
             return to_json_value(std::forward<T>(x));
         }
 
         template<typename... T> constexpr auto normalize(const std::tuple<T...> &x);
         template<typename... T> constexpr auto normalize(std::tuple<T...> &&x);
+    }
 
+    template<typename T> concept json_value_convertable = requires(T x) {
+        { detail::normalize(x) } -> json_value;
+    };
+
+    namespace detail {
         template<typename T> using normalized = decltype(normalize(std::declval<T>()));
 
         template<std::ranges::input_range R>
-        requires json_value<detail::normalized<std::ranges::range_value_t<R>>>
+        requires json_value_convertable<std::ranges::range_value_t<R>>
         struct is_obj<array<R>> : std::true_type {};
 
-        template<json_value T> struct attr_value {
+        template<typename T> struct attr_value {
             std::string_view name;
             T value;
         };
@@ -76,13 +88,11 @@ namespace json {
         template<typename... T> struct is_obj<obj<T...>> : std::true_type {};
     }
 
-    template<typename T> concept json_value_convertable = json_value<detail::normalized<T>>;
-
     namespace detail {
         struct array_tuple_t {
             template<json_value_convertable... T>
-            constexpr auto operator()(const T&... values) {
-                return detail::array{std::tuple(normalize(values)...)};
+            constexpr auto operator()(T&&... values) const {
+                return array(std::tuple(normalize(std::forward<T>(values))...));
             }
         };
         template<typename... T> constexpr auto normalize(const std::tuple<T...> &x) {
@@ -97,9 +107,12 @@ namespace json {
         std::string_view name;
 
         template<json_value_convertable T>
-        constexpr detail::attr_value<detail::normalized<T>> operator=(const T &val) const {
-            return {name,detail::normalize(val)};
+        constexpr detail::attr_value<detail::normalized<T>>
+        operator=(T &&val) const {
+            return {name,detail::normalize(std::forward<T>(val))};
         }
+
+        attr(std::string_view name) : name{name} {}
     };
 
     template<json_value... T> constexpr auto obj(detail::attr_value<T>... values) {
@@ -112,6 +125,10 @@ namespace json {
     requires json_value_convertable<std::ranges::range_value_t<R>>
     constexpr auto array_range(R &&r) {
         return detail::array<R>{std::forward<R>(r)};
+    }
+
+    template<typename T> constexpr std::optional<detail::normalized<T>> just(T &&value) {
+        return {detail::normalize(std::forward<T>(value))};
     }
 
     /* escapes all input to an underlying stream buffer */
@@ -157,33 +174,40 @@ class message_canvas {
     void emit_value(short x) { return emit_value(static_cast<long>(x)); }
     void emit_value(unsigned short x) { return emit_value(static_cast<long>(x)); }
 
-    template<typename T> void emit_value(json::detail::attr_value<T> value) {
+    template<typename T> void emit_value(std::optional<T> &&value) {
+        if(value) emit_value(std::move(*value));
+        else emit_value(nullptr);
+    }
+
+    template<typename T> void emit_value(json::detail::attr_value<T> &&value) {
         emit_value(value.name);
         emit_raw(':');
-        emit_value(value.value);
+        emit_value(std::move(value.value));
     }
 
     void emit_delimited() const {}
-    template<typename T> void emit_delimited(const T &value) { emit_value(value); }
-    template<typename T1,typename T2,typename... T> void emit_delimited(const T1 &value1,const T2 &value2,const T&... values) {
-        emit_value(value1);
+    template<typename T> void emit_delimited(T &&value) { emit_value(std::forward<T>(value)); }
+    template<typename T1,typename T2,typename... T> void emit_delimited(T1 &&value1,T2 &&value2,T&&... values) {
+        emit_value(std::forward<T1>(value1));
         emit_raw(',');
-        emit_delimited(value2,values...);
+        emit_delimited(std::forward<T2>(value2),std::forward<T>(values)...);
     }
     constexpr auto delimiter() {
-        return [this]<typename... T>(const T&... values){ emit_delimited(values...); };
+        return [this]<typename... T>(T&&... values){ emit_delimited(std::forward<T>(values)...); };
     }
 
-    template<typename... T> void emit_value(const json::detail::obj<T...> &obj) {
+    template<typename... T> void emit_value(json::detail::obj<T...> &&obj) {
         emit_raw('{');
-        std::apply(delimiter(),obj.values);
+        std::apply(delimiter(),std::move(obj.values));
         emit_raw('}');
     }
 
-    template<typename... T> void emit_array(const std::tuple<T...> &values) {
-        std::apply(delimiter(),values);
+    template<typename... T> void emit_array(std::tuple<T...> &&values) {
+        std::apply(delimiter(),std::move(values));
     }
-    template<std::ranges::input_range R> void emit_array(const R &values) {
+    template<typename R>
+    requires std::ranges::input_range<std::remove_reference_t<R>>
+    void emit_array(R &&values) {
         bool started = false;
         for(auto &&v : values) {
             if(started) emit_raw(',');
@@ -191,9 +215,9 @@ class message_canvas {
             emit_value(json::detail::normalize(v));
         }
     }
-    template<typename T> void emit_value(const json::detail::array<T> &obj) {
+    template<typename T> void emit_value(json::detail::array<T> &&obj) {
         emit_raw('[');
-        emit_array(obj.values);
+        emit_array(std::forward<T>(obj.values));
         emit_raw(']');
     }
 
@@ -218,9 +242,9 @@ public:
     VISIBLE ~message_canvas();
 
     template<json::json_value_convertable T>
-    void message(T m) {
+    void message(T &&m) {
         check_ready();
-        emit_value(json::detail::normalize(m));
+        emit_value(json::detail::normalize(std::forward<T>(m)));
         send();
     }
 

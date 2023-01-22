@@ -6,6 +6,7 @@
 #include <string_view>
 #include <memory>
 #include <cstring>
+#include <chrono>
 
 #include "server.hpp"
 
@@ -17,75 +18,114 @@
 #define POLY_OPS_ASSERT_SLOW POLY_OPS_ASSERT
 
 #if DEBUG_STEP_BY_STEP
-#define DEBUG_STEP_BY_STEP_EVENT_F if(graphical_debug) { \
-    { \
-        auto out = mc__->console_line_stream(); \
-        out << "event: FORWARD at " << e.ab << "  x: " << e.ab.a_x(lpoints); \
-        emit_line_before_after(out, \
-            (itr == sweep.begin() ? sweep.end() : std::prev(itr)), \
-            std::next(itr), \
-            sweep.end()); \
-    } \
-    delegate_drawing(lpoints,sweep,e,original_sets); } (void)0
-
-#define DEBUG_STEP_BY_STEP_EVENT_B if(graphical_debug) { \
-    { \
-        auto out = mc__->console_line_stream(); \
-        out << "event: BACKWARD at " << e.line_ba() << "  x: " << e.ab.a_x(lpoints); \
-        emit_line_before_after(out, \
-            (itr == sweep.begin() ? sweep.end() : std::prev(itr)), \
-            itr, \
-            sweep.end()); \
-    } \
-    delegate_drawing(lpoints,sweep,e,original_sets); } (void)0
-
-#define DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE if(graphical_debug) { \
-    report_hits(e.ab.a,intrs_tmp[0],std::get<0>(lb.result())); \
-    report_hits(e.ab.b,intrs_tmp[0],std::get<1>(lb.result())); \
+#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F if(graphical_debug) { \
+    emit_forward_backward( \
+        true, \
+        e.ab, \
+        (itr == sweep.begin() ? sweep.end() : std::prev(itr)), \
+        std::next(itr), \
+        sweep, \
+        events); \
+    delegate_drawing(lpoints,sweep,e); \
 }
 
-#define DEBUG_STEP_BY_STEP_MISSED_INTR report_missed_intr(s1,s2)
+#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_FR if(graphical_debug) { \
+    auto out = mc__->console_line_stream(); \
+    out << "undoing: FORWARD at " << e.ab; \
+}
+
+#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_B if(graphical_debug) { \
+    emit_forward_backward( \
+        false, \
+        e.ab, \
+        (itr == sweep.begin() ? sweep.end() : std::prev(itr)), \
+        itr, \
+        sweep, \
+        events); \
+    delegate_drawing(lpoints,sweep,e); \
+}
+
+#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_BR if(graphical_debug) { \
+    auto out = mc__->console_line_stream(); \
+    out << "undoing: BACKWARD at " << e.line_ba(); \
+}
+
+#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE if(graphical_debug) { \
+    report_hits(e.ab.a,intrs_tmp[0],std::get<0>(lb.result())); \
+    report_hits(e.ab.b,intrs_tmp[1],std::get<1>(lb.result())); \
+}
+
+#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_SAMPLE if(graphical_debug) { \
+    report_hits(e.ab.b,samples[e.ab.a].hits,lb.result()); \
+}
+
+#define POLY_OPS_DEBUG_STEP_BY_STEP_MISSED_INTR report_missed_intr(s1,s2)
+
+#define POLY_OPS_DEBUG_ITERATION if(timeout) { \
+    if(std::chrono::steady_clock::now() > timeout_expiry) { \
+        timeout = false; \
+        throw timed_out{}; \
+    } \
+}
 #endif // DEBUG_STEP_BY_STEP
 
 typedef int32_t coord_t;
 typedef uint16_t index_t;
 
-struct assertion_failure : std::logic_error {
-    using logic_error::logic_error;
+struct test_failure : std::exception {
+    virtual std::ostream &emit(std::ostream &os) const = 0;
+    const char *what() const noexcept override {
+        return "test failure";
+    }
 };
+struct assertion_failure : test_failure {
+    const char *assertion_str;
+    explicit assertion_failure(const char *assertion) : assertion_str(assertion) {}
+
+    std::ostream &emit(std::ostream &os) const override {
+        return os << "assertion failure: " << assertion_str;
+    }
+};
+struct timed_out : test_failure {
+    std::ostream &emit(std::ostream &os) const override {
+        return os << "test timed out";
+    }
+};
+std::ostream &operator<<(std::ostream &os,const test_failure &f) {
+    return f.emit(os);
+}
 
 thread_local message_canvas *mc__ = nullptr;
 bool graphical_debug = false;
+bool timeout = false;
+std::chrono::steady_clock::time_point timeout_expiry;
 
 namespace poly_ops::detail {
 template<typename Index> struct event;
 template<typename Index,typename Coord> struct loop_point;
 template<typename Index> struct segment;
 }
-template<typename Sweep,typename OSet> void delegate_drawing(
+template<typename Sweep> void delegate_drawing(
     const std::pmr::vector<poly_ops::detail::loop_point<index_t,coord_t>> &lpoints,
     const Sweep &sweep,
-    const poly_ops::detail::event<index_t> &e,
-    const OSet &original_sets);
-template<typename OSet> void delegate_drawing_trimmed(
-    const std::pmr::vector<poly_ops::detail::loop_point<index_t,coord_t>> &lpoints,
-    const OSet &original_sets);
+    const poly_ops::detail::event<index_t> &e);
+void delegate_drawing_trimmed(
+    const std::pmr::vector<poly_ops::detail::loop_point<index_t,coord_t>> &lpoints);
 std::ostream &operator<<(std::ostream &os,const poly_ops::detail::segment<index_t> &x);
-template<typename Itr> void emit_line_before_after(std::ostream &out,Itr before,Itr after,Itr end) {
-    out << "\n  line before: ";
-    if(before == end) out << "none";
-    else out << *before;
-    out << "\n  line after: ";
-    if(after == end) out << "none";
-    else out << *after;
-}
+template<typename Sweep,typename Events> void emit_forward_backward(
+    bool forward,
+    poly_ops::detail::segment<index_t> seg,
+    std::ranges::iterator_t<const Sweep> before,
+    std::ranges::iterator_t<const Sweep> after,
+    const Sweep &sweep,
+    const Events &events);
 template<typename T> struct _pp;
-template<typename T> _pp<T> pp(T &&x,unsigned int indent=0);
+template<typename T> _pp<T> pp(T &&x,unsigned int indent);
 
 void report_hits(index_t index,const std::pmr::vector<index_t> &hits,int balance);
 void report_missed_intr(poly_ops::detail::segment<index_t> s1,poly_ops::detail::segment<index_t> s2);
 
-#include "poly_ops.hpp"
+#include "../include/poly_ops/poly_ops.hpp"
 #include "stream_output.hpp"
 
 using namespace poly_ops;
@@ -122,7 +162,7 @@ std::ostream &operator<<(std::ostream &os,const point_t<coord_t> &x) {
 }
 
 std::ostream &operator<<(std::ostream &os,const detail::loop_point<index_t,coord_t> &x) {
-    return os << '{' << x.data << "}," << x.original_set << ',' << x.next;
+    return os << '{' << x.data << "}," << ',' << x.next;
 }
 
 std::ostream &operator<<(std::ostream &os,const detail::segment<index_t> &x) {
@@ -133,6 +173,41 @@ namespace poly_ops {
     template<typename Coord> auto to_json_value(const point_t<Coord> &p) {
         return json::array_range(p);
     }
+
+    namespace detail {
+        template<typename Index> auto to_json_value(const segment<Index> &x) {
+            return json::array_tuple(x.a,x.b);
+        }
+
+        template<typename Index> auto to_json_value(const event<Index> &x) {
+            using namespace json;
+
+            return obj(
+                attr("ab") = x.ab,
+                attr("deleted") = x.status == event_status_t::deleted,
+                attr("type") = static_cast<int>(x.type) - static_cast<int>(event_type_t::vforward));
+        }
+    }
+}
+
+template<typename Sweep,typename Events> void emit_forward_backward(
+    bool forward,
+    poly_ops::detail::segment<index_t> seg,
+    std::ranges::iterator_t<const Sweep> before,
+    std::ranges::iterator_t<const Sweep> after,
+    const Sweep &sweep,
+    const Events &events)
+{
+    using namespace json;
+
+    mc__->message(obj(
+        attr("command") = "event",
+        attr("type") = forward ? "forward" : "backward",
+        attr("segment") = seg,
+        attr("before") = before != sweep.end() ? just(*before) : std::nullopt,
+        attr("after") = after != sweep.end() ? just(*after) : std::nullopt,
+        attr("sweep") = array_range(sweep),
+        attr("events") = array_range(events)));
 }
 
 void report_hits(index_t index,const std::pmr::vector<index_t> &hits,int balance) {
@@ -166,7 +241,7 @@ auto to_json_value(const draw_point &p) {
         attr("state") = static_cast<int>(p.type));
 }
 
-void dump_original_points(
+/*void dump_original_points(
     const std::pmr::vector<detail::loop_point<index_t,coord_t>> &lpoints,
     const auto &original_sets)
 {
@@ -184,13 +259,12 @@ void dump_original_points(
         }
         out << '\n';
     }
-}
+}*/
 
-template<typename Sweep,typename OSet> void delegate_drawing(
+template<typename Sweep> void delegate_drawing(
     const std::pmr::vector<detail::loop_point<index_t,coord_t>> &lpoints,
     const Sweep &sweep,
-    const detail::event<index_t> &e,
-    const OSet &original_sets)
+    const detail::event<index_t> &e)
 {
     if(!graphical_debug) return;
 
@@ -219,19 +293,12 @@ template<typename Sweep,typename OSet> void delegate_drawing(
         std::u8string_view msg = mc__->get_text();
         if(msg == u8"continue"sv) {
             break;
-        } else if(msg == u8"dump_sweep"sv) {
-            auto out = mc__->console_line_stream();
-            out << "sweep items:\n";
-            for(auto s : sweep) out << "  " << s << '\n';
-        } else if(msg == u8"dump_orig_points"sv) {
-            dump_original_points(lpoints,original_sets);
         } else throw std::runtime_error("unexpected command received from client");
     }
 }
 
-template<typename OSet> void delegate_drawing_trimmed(
-    const std::pmr::vector<detail::loop_point<index_t,coord_t>> &lpoints,
-    const OSet &original_sets)
+void delegate_drawing_trimmed(
+    const std::pmr::vector<detail::loop_point<index_t,coord_t>> &lpoints)
 {
     if(!graphical_debug) return;
 
@@ -242,12 +309,12 @@ template<typename OSet> void delegate_drawing_trimmed(
         draw_point::state state = draw_point::NORMAL;
         if(lpoints[i].line_bal < 0) state = draw_point::INVERTED;
         else if(lpoints[i].line_bal > 0) state = draw_point::NESTED;
-        else {
+        /*else {
             for(index_t orig : original_sets[lpoints[i].original_set]) {
                 const coord_t *op = input_coords[orig];
                 draw_lines.emplace_back(point_t<coord_t>{op[0],op[1]},i,draw_point::TO_ORIGINAL);
             }
-        }
+        }*/
 
         draw_lines[i] = {lpoints[i].data,lpoints[i].next,state};
     }
@@ -262,10 +329,6 @@ template<typename OSet> void delegate_drawing_trimmed(
         std::u8string_view msg = mc__->get_text();
         if(msg == u8"continue") {
             break;
-        } else if(msg == u8"dump_sweep") {
-            // "sweep" not available. Do nothing.
-        } else if(msg == u8"dump_orig_points") {
-            dump_original_points(lpoints,original_sets);
         } else throw std::runtime_error("unexpected command received from client");
     }
 }

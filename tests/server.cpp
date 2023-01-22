@@ -52,11 +52,11 @@ void report_error(beast::error_code ec) {
     report_error(ec.message());
 }
 
-void post_error(net::io_context::executor_type exc,beast::error_code ec) {
+void post_error(auto exc,beast::error_code ec) {
     net::post(exc,[=]{ report_error(ec); });
 }
 
-void post_error(net::io_context::executor_type exc,const std::string &msg) {
+void post_error(auto exc,const std::string &msg) {
     net::post(exc,[=]{ report_error(msg); });
 }
 }
@@ -505,7 +505,7 @@ void message_canvas::emit_value(unsigned long x) { data.obuffer << x; }
 void message_canvas::emit_value(float x) { data.obuffer << x; }
 void message_canvas::emit_value(double x) { data.obuffer << x; }
 void message_canvas::emit_value(std::string_view x) {
-    data.obuffer << '"' << json_escape_str(x) << '"';
+    data.obuffer << '"' << json_escape_str{x} << '"';
 }
 void message_canvas::send() {
     data.deliver_obuffer();

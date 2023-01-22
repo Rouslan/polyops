@@ -1,6 +1,7 @@
 const POINT_HIT_CIRCLE_R = 5;
 
 const state_classes = [null,"sweep","inverted","nested","tooriginal"];
+const event_types = ['vforward','backward','forward','vbackward','calc_balance_intr','calc_intr_sample'];
 
 function vGetX(a) {
     if(typeof a === 'number') return a;
@@ -64,12 +65,68 @@ function viewExtent(points,padding) {
     return [vadd(max_corner,padding),vsub(min_corner,padding)];
 }
 
-export default function (doc,inputCoords=null) {
-    const svg = doc.getElementsByTagName("svg")[0];
+function connectClassToggle(checkElemId,targetElem,classname) {
+    const checkElem = document.getElementById(checkElemId);
+    checkElem.onchange = (e) => {
+        if(e.target.checked) targetElem.classList.add(classname);
+        else targetElem.classList.remove(classname);
+    };
+    if(checkElem.checked) targetElem.classList.add(classname);
+}
+
+function makeElem(etype,attrs={}) {
+    const e = attrs.namespace === undefined ?
+        document.createElement(etype) : document.createElementNS(attrs.namespace,etype);
+    if(attrs.id !== undefined) e.id = attrs.id;
+    if(attrs.classes !== undefined) {
+        if(typeof attrs.classes === 'string') e.className = attrs.classes;
+        else e.classList.add(...attrs.classes);
+    }
+    if(attrs.inner !== undefined) {
+        if(Array.isArray(attrs.inner)) e.append(...attrs.inner);
+        else e.append(attrs.inner);
+    }
+    return e;
+}
+
+function lineAtIndex(i) {
+    return document.getElementById('p'+i);
+}
+
+class LineHighlighter {
+    constructor(mainCName,lineCName) {
+        this.mainCName = mainCName;
+        this.lineCName = lineCName;
+        this.mainElem = null;
+        this.lines = null;
+    }
+    reset(mainElem=null,lines=[]) {
+        if(this.mainElem !== null) {
+            this.mainElem.classList.remove(this.mainCName);
+            for(const line of this.lines)
+                lineAtIndex(line).classList.remove(this.lineCName);
+        }
+        this.mainElem = mainElem;
+        this.lines = lines;
+        if(mainElem !== null) {
+            mainElem.classList.add(this.mainCName);
+            for(const line of lines)
+                lineAtIndex(line).classList.add(this.lineCName);
+        }
+    }
+}
+
+function segmentStr(s,rev=false) {
+    return s === null ? 'none' : `${s[rev ? 1 : 0]} - ${s[rev ? 0 : 1]}`;
+}
+
+export default function (inputCoords=null) {
+    const svg = document.getElementsByTagName("svg")[0];
     const svgNS = 'http://www.w3.org/2000/svg';
-    const socketO = doc.getElementById('socketO');
-    const statusBar = doc.getElementById('statusbar');
-    const zoomValue = doc.getElementById('zoomValue');
+    const socketO = document.getElementById('socketO');
+    const socketOExtra = document.getElementById('socketOExtra');
+    const statusBar = document.getElementById('statusbar');
+    const zoomValue = document.getElementById('zoomValue');
     const buttons = [];
     let invViewTransform;
     let viewScale = 1;
@@ -77,64 +134,25 @@ export default function (doc,inputCoords=null) {
     const originalViewBox = [null,null];
     let dragging = false;
 
-    function lineAtIndex(i) {
-        return doc.getElementById('p'+i);
-    }
-    class LineHighlighter {
-        constructor(mainCName,lineCName) {
-            this.mainCName = mainCName;
-            this.lineCName = lineCName;
-            this.mainElem = null;
-            this.lines = null;
-        }
-        reset(mainElem=null,lines=[]) {
-            if(this.mainElem !== null) {
-                this.mainElem.classList.remove(this.mainCName);
-                for(const line of this.lines)
-                    lineAtIndex(line).classList.remove(this.lineCName);
-            }
-            this.mainElem = mainElem;
-            this.lines = lines;
-            if(mainElem !== null) {
-                mainElem.classList.add(this.mainCName);
-                for(const line of lines)
-                    lineAtIndex(line).classList.add(this.lineCName);
-            }
-        }
-    }
-
     const hotElements = new LineHighlighter('hot','hot');
 
     const getInputPoint = i => [inputCoords[i*2],inputCoords[i*2+1]];
     const getInputLength = () => inputCoords.length / 2;
 
     function addLine(type,content,element='div') {
-        const line = doc.createElement(element);
-        line.className = type;
-        line.textContent = content;
-        socketO.appendChild(line);
+        const line = makeElem(element,{classes: type,inner: content});
+        socketO.append(line);
         line.scrollIntoView();
         return line;
     }
 
-    const showrawtoggle = doc.getElementById('showrawtoggle');
-    showrawtoggle.onchange = (e) => {
-        if(e.target.checked) socketO.classList.add('showraw');
-        else socketO.classList.remove('showraw');
-    };
-    if(showrawtoggle.checked) socketO.classList.add('showraw');
-
-    const showvlabeltoggle = doc.getElementById('showvlabeltoggle');
-    showvlabeltoggle.onchange = (e) => {
-        if(e.target.checked) svg.classList.add('showvlabel');
-        else svg.classList.remove('showvlabel');
-    };
-    if(showvlabeltoggle.checked) svg.classList.add('showvlabel');
-
+    connectClassToggle('showrawtoggle',socketO,'showraw');
+    connectClassToggle('showsweeptoggle',socketO,'showsweep');
+    connectClassToggle('showvlabeltoggle',svg,'showvlabel');
 
     /* cancel out scaling applied to the SVG viewport for certain elements,
     using CSS */
-    let rules = doc.getElementsByTagName('style')[0].sheet.cssRules;
+    let rules = document.getElementsByTagName('style')[0].sheet.cssRules;
     let style = null;
     for(const r of rules) {
         if(r.selectorText == '.scaleinvariant') {
@@ -167,7 +185,7 @@ export default function (doc,inputCoords=null) {
     }
 
     function createSVGPolyLine(points) {
-        const pl = doc.createElementNS(svgNS,'polyline');
+        const pl = document.createElementNS(svgNS,'polyline');
         for(const p of points) {
             pl.points.appendItem(setXY(svg.createSVGPoint(),p));
         }
@@ -187,18 +205,18 @@ export default function (doc,inputCoords=null) {
 
         const linestarts = lines.map(x => x[0]);
 
-        const g = doc.createElementNS(svgNS,'g');
+        const g = document.createElementNS(svgNS,'g');
         g.classList.add('scaleinvariant');
         g.style.setProperty('transform-origin',`${p[0]}px ${p[1]}px`);
 
-        let e = doc.createElementNS(svgNS,'text');
+        let e = document.createElementNS(svgNS,'text');
         e.x.baseVal.initialize(createSVGLength(p[0]));
         e.y.baseVal.initialize(createSVGLength(p[1]));
         e.classList.add('vlabel');
-        e.appendChild(doc.createTextNode(linestarts.join('/')));
+        e.appendChild(document.createTextNode(linestarts.join('/')));
         g.appendChild(e);
 
-        e = doc.createElementNS(svgNS,'circle');
+        e = document.createElementNS(svgNS,'circle');
         setSVGLength(e.cx,p[0]);
         setSVGLength(e.cy,p[1]);
         setSVGLength(e.r,POINT_HIT_CIRCLE_R);
@@ -209,7 +227,7 @@ export default function (doc,inputCoords=null) {
 
             const mPoint = clientToSVGCoords(e.clientX,e.clientY);
 
-            for(const elem of doc.elementsFromPoint(e.clientX,e.clientY)) {
+            for(const elem of document.elementsFromPoint(e.clientX,e.clientY)) {
                 if(elem.localName == 'circle') {
                     const d = vsquare(vsub(mPoint,[elem.cx.baseVal.value,elem.cy.baseVal.value]));
                     if(closest_d === null || d < closest_d) {
@@ -333,8 +351,8 @@ export default function (doc,inputCoords=null) {
         else setSvgZoom(z/100);
     };
 
-    doc.getElementById('bZoomIn').onclick = () => { setSvgZoom(viewScale*1.1); };
-    doc.getElementById('bZoomOut').onclick = () => { setSvgZoom(viewScale/1.1); };
+    document.getElementById('bZoomIn').onclick = () => { setSvgZoom(viewScale*1.1); };
+    document.getElementById('bZoomOut').onclick = () => { setSvgZoom(viewScale/1.1); };
 
     svg.onpointerdown = e => {
         if(!e.isPrimary) return;
@@ -369,19 +387,54 @@ export default function (doc,inputCoords=null) {
             clientToSVGCoords(e.clientX,e.clientY));
     };
 
-    const selectedLB = new LineHighlighter('selected','lbhit');
+    const selectedLB = new LineHighlighter('active','lbhit');
     function addLineBalanceInfo(pi,hits,balance) {
         const line = addLine(
             'lbinfo',
             `line balance of point ${pi}: ${balance}  hits: ${hits.join(',')}`);
         line.tabIndex = 0;
         const toggle = e => {
-            if(selectedLB.mainElem === e.target) selectedLB.reset();
-            else selectedLB.reset(e.target,hits);
+            if(selectedLB.mainElem === e.currentTarget) selectedLB.reset();
+            else selectedLB.reset(e.currentTarget,hits);
         };
         line.onclick = toggle;
         line.onkeydown = e => {
-            if(e.keyCode == 'Space' || e.keyCode == 'Enter') toggle(e);
+            if(e.code == 'Space' || e.code == 'Enter') toggle(e);
+        };
+    }
+
+    let selectedMsg = null;
+    function forwardBackwardEvent(forward,segment,before,after,sweep,events) {
+        const sweepItems = [];
+        for(const s of sweep) sweepItems.push(makeElem('li',{inner: segmentStr(s)}));
+        const msg = addLine('eventMessage',[
+            makeElem('div',{inner: `event: ${forward ? 'FORWARD' : 'BACKWARD'} ${segmentStr(segment,!forward)}`}),
+            makeElem('div',{classes: 'extrainfo',inner: [
+                makeElem('div',{inner: `before: ${segmentStr(before)}`}),
+                makeElem('div',{inner: `after: ${segmentStr(after)}`}),
+                makeElem('div',{classes: 'sweep',inner: [
+                    makeElem('div',{inner: 'Sweep items:'}),
+                    makeElem('ul',{inner: sweepItems})
+                ]})
+            ]})
+        ]);
+        msg.tabIndex = 0;
+        const activate = e => {
+            if(selectedMsg !== e.currentTarget) {
+                if(selectedMsg !== null) selectedMsg.classList.remove('active');
+                selectedMsg = e.currentTarget;
+                selectedMsg.classList.add('active');
+                socketOExtra.textContent = null;
+                for(const e of events) {
+                    const entry = makeElem('div',{inner: `${event_types[e.type]}: ${e.ab[0]} - ${e.ab[1]}`});
+                    if(e.deleted) entry.classList.add('deleted');
+                    socketOExtra.append(entry);
+                }
+            }
+        };
+        msg.onclick = activate;
+        msg.onkeydown = e => {
+            if(e.code == 'Space' || e.code == 'Enter') activate(e);
         };
     }
 
@@ -408,20 +461,25 @@ export default function (doc,inputCoords=null) {
             case "originalpoints":
                 inputCoords = msg.points;
                 break;
+            case 'event':
+                switch(msg.type) {
+                case "forward":
+                case "backward":
+                    forwardBackwardEvent(msg.type == 'forward',msg.segment,msg.before,msg.after,msg.sweep,msg.events);
+                    break;
+                }
+                break;
             default:
-                addLine('error','unrecognised command: "' + msg.command + '"');
+                addLine('error',`unrecognised command: "${msg.command}"`);
             }
         };
         ws.onopen = e => {
             for(const b of buttons) b.disabled = false;
         };
 
-        let b = doc.getElementById('bContinue');
+        let b = document.getElementById('bContinue');
         buttons.push(b);
         b.onclick = e => { ws.send('continue'); };
-        b = doc.getElementById('bDumpSweep');
-        buttons.push(b);
-        b.onclick = e => { ws.send('dump_sweep'); }
     } catch(e) {
         addLine('error',"error: " + e.message);
     }

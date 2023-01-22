@@ -5,10 +5,15 @@ body {
     box-sizing: border-box;
     height: 100vh;
 }
+ul {
+    margin: 0;
+    padding-left: 2em;
+}
 #hgroup {
     display: flex;
     flex: 1;
     min-height: 0; /* needed to prevent expanding to content */
+    contain: size;
 }
 #statusbar {
     padding: 0.5em;
@@ -24,13 +29,21 @@ body {
     flex-direction: column;
     border-left: 2px solid #ccc;
     height: 100%;
+    contain: size;
 }
 #socketI {
     padding: 0.5em;
     background: linear-gradient(#f9f9f9,#eee);
     border-bottom: 1px solid #ccc;
 }
-#socketO {
+#socketOGroup {
+    flex: 1;
+    display: flex;
+    height: 100%;
+    min-height: 0; /* needed to prevent expanding to content */
+    contain: size;
+}
+#socketOGroup > * {
     flex: 1;
     font-family: monospace;
     overflow-x: auto;
@@ -40,9 +53,11 @@ body {
     box-sizing: border-box;
     contain: size;
 }
-#socketO pre { margin: 0; }
-#socketO .selected { background-color: grey; }
-#socketO .lbinfo { cursor: default; }
+pre { margin: 0; }
+#socketO .active { background-color: #ccc; }
+#socketO .lbinfo, #socketO .eventMessage { cursor: default; }
+.extrainfo { padding-left: 1em; }
+.deleted { text-decoration-line: line-through; }
 #graphics {
     flex: 200px;
     box-sizing: border-box;
@@ -107,11 +122,15 @@ svg .hitarea {
 svg .hot > text { fill: red; }
 svg polyline.hot, svg polygon.hot { stroke-width: 2px; }
 .error { color: red; }
-.raw { display: none; }
-.showraw .raw {
-    display: block;
+.raw {
+    display: none;
     color: grey;
 }
+.showraw .raw { display: block; }
+#socketO .sweep {
+    display: none;
+}
+#socketO.showsweep .sweep { display: block; }
 polyline, polygon {
     stroke: black;
     vector-effect: non-scaling-stroke;

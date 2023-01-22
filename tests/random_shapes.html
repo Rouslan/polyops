@@ -28,17 +28,20 @@
     <div id="socketIO">
       <div id="socketI">
         <button id="bContinue" disabled autofocus type="button">Continue</button>
-        <button id="bDumpSweep" disabled type="button">Dump Sweep</button>
+        <label><input type="checkbox" id="showsweeptoggle">Show sweep contents</label>
         <label><input type="checkbox" id="showrawtoggle">Show raw input</label>
       </div>
-      <div id="socketO"></div>
+      <div id="socketOGroup">
+        <div id="socketO"></div>
+        <pre id="socketOExtra"></pre>
+      </div>
     </div>
   </div>
   <div id="statusbar">&nbsp;</div>
   <script type="module">
     import initInterface from '/common.js';
     import initExport from '/savesvg.js';
-    initInterface(document);
+    initInterface();
     initExport(
         document.getElementsByTagName('svg')[0],
         document.getElementById('bExport'),

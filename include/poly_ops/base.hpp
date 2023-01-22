@@ -1,7 +1,6 @@
 #ifndef POLY_OPS_BASE_HPP
 #define POLY_OPS_BASE_HPP
 
-#include <stdint.h>
 #include <vector>
 #include <set>
 #include <map>
@@ -25,59 +24,65 @@
 #endif
 
 #ifndef POLY_OPS_ASSERT
-#include <assert.h>
+#include <cassert>
 #define POLY_OPS_ASSERT assert
+#endif
 
-// used for checks that would drastically slow down the algorithm
+// used for checks that will significantly slow down the algorithm
+#ifndef POLY_OPS_ASSERT_SLOW
 #define POLY_OPS_ASSERT_SLOW(X) (void)0
 #endif
 
-// the graphical test program defines these (in graphical_test.cpp)
-#ifndef DEBUG_STEP_BY_STEP_EVENT_F
-#define DEBUG_STEP_BY_STEP_EVENT_F (void)0
-#define DEBUG_STEP_BY_STEP_EVENT_B (void)0
-#define DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE (void)0
-#define DEBUG_STEP_BY_STEP_MISSED_INTR (void)0
+// the graphical test program defines these
+#ifndef POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F
+#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F
+#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_FR
+#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_B
+#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_BR
+#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE
+#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_SAMPLE
+#define POLY_OPS_DEBUG_STEP_BY_STEP_MISSED_INTR (void)0
+#define POLY_OPS_DEBUG_ITERATION
 #endif
 
 namespace poly_ops {
 
-/* Mathematical operations on coordinate types. This struct can be specialized
+/** Mathematical operations on coordinate types. This struct can be specialized
 for user-defined types. Arithmetic operators should be defined for every
 permutation of Coord, long_t and real_t. Binary operations with Coord and long_t
 should return long_t, long_t and real_t should return real_t, and Coord and
 real_t should return real_t. */
 template<typename Coord> struct coord_ops {
-    /* Certain operations require double the bits of the maximum coordinate
+    /** Certain operations require double the bits of the maximum coordinate
     value to avoid overflow. This type can be specialized if the default "long"
     type is not wide enough for a given coordinate type. */
     using long_t = long;
 
-    /* The coordinates of generated points are usually real numbers. By default,
-    they are represented by double before being rounded back to integers. This
-    type can be specialized to use float instead, or some custom type for more
-    precision. */
+    /** The coordinates of generated points are usually real numbers. By
+    default, they are represented by double before being rounded back to
+    integers. This type can be specialized to use float instead, or some custom
+    type for more precision. */
     using real_t = double;
 
-    /* For user-defined real number types, functions need to be defined that are
-    equivalent to the following functions from the "std" namespace: */
+    /** For user-defined real number types, functions need to be defined that
+    are equivalent to the following functions from the "std" namespace: */
     template<typename T> static real_t acos(T x) { return std::acos(static_cast<real_t>(x)); }
     static real_t cos(real_t x) { return std::cos(x); }
     static real_t sin(real_t x) { return std::sin(x); }
     template<typename T> static real_t sqrt(T x) { return std::sqrt(static_cast<real_t>(x)); }
 
-    /* This is used to convert real number coordinates to the normal type */
+    /** This is used to convert real number coordinates to the normal type */
     static Coord round(real_t x) { return static_cast<Coord>(std::lround(x)); }
 
-    /* After dermining how many points to use to approximate an arc, using real
+    /** After dermining how many points to use to approximate an arc using real
     numbers, the value needs to be converted to an integer to use in a loop */
     static Coord floor(real_t x) { return static_cast<Coord>(x); }
 
     static real_t pi() { return std::numbers::pi_v<real_t>; }
 };
 
-template<typename Coord> using long_coord_t = coord_ops<Coord>::long_t;
-template<typename Coord> using real_coord_t = coord_ops<Coord>::real_t;
+template<typename Coord> using long_coord_t = typename coord_ops<Coord>::long_t;
+template<typename Coord> using real_coord_t = typename coord_ops<Coord>::real_t;
 
 /* Getters for point-like objects. This can be specialized for any user-defined
 types. Static functions "get_x" and "get_y" should be defined to get the X and Y
@@ -266,7 +271,7 @@ struct point_less {
     }
 };
 
-template<typename T> constexpr T vdot(const point_t<T> &a,const point_t<T> &b) {
+template<typename T,typename U> constexpr auto vdot(const point_t<T> &a,const point_t<U> &b) {
     return a[0]*b[0] + a[1]*b[1];
 }
 
@@ -359,7 +364,7 @@ protected:
     ~point_tracker() = default;
 };
 
-/** Point tracking interface.
+/** Point tracking interface for "normalize".
 
 Note that the destructor is not virtual, and is instead protected.
 */
@@ -427,10 +432,15 @@ template<typename Index> struct segment {
     Index a;
     Index b;
 
-    template<typename T> auto a_x(const T &points) const { return points[a].data[0]; }
-    template<typename T> auto a_y(const T &points) const { return points[a].data[1]; }
-    template<typename T> auto b_x(const T &points) const { return points[b].data[0]; }
-    template<typename T> auto b_y(const T &points) const { return points[b].data[1]; }
+    segment() = default;
+    segment(Index a,Index b) : a{a}, b{b} {}
+    segment(const segment&) = default;
+    segment(segment&&) = default;
+
+    auto a_x(const auto &points) const { return points[a].data[0]; }
+    auto a_y(const auto &points) const { return points[a].data[1]; }
+    auto b_x(const auto &points) const { return points[b].data[0]; }
+    auto b_y(const auto &points) const { return points[b].data[1]; }
 
     /* returns true if point 'a' comes before point 'b' in the loop */
     template<typename T> bool a_is_main(const T &points) const {
@@ -451,21 +461,47 @@ non-vertical lines, can intersect with lines that start and end at the same X
 coordinate as the start/end of the vertical line.
 
 The comparison functor "sweep_cmp" requires that "backward" come before
-"forward". */
-enum class event_type_t {calc_intr_sample_neg,vforward,backward,forward,vbackward,calc_balance_intr,calc_intr_sample_pos};
+"forward".
+
+Lession learned: don't split calc_balance_intr or calc_intr_sample into positive
+and negative versions to reduce how many checks are done. The value of
+"hsign_of" can change as points are added. */
+enum class event_type_t {vforward,backward,forward,vbackward,calc_balance_intr,calc_intr_sample};
+
+enum class event_status_t {normal,visited,deleted};
 
 template<typename Index> struct event {
     segment<Index> ab;
     event_type_t type;
-    bool deleted;
+    event_status_t status;
+
+    event() = default;
+    event(segment<Index> ab,event_type_t type)
+        : ab{ab}, type{type}, status{event_status_t::normal} {}
+    event(const event &b) = default;
+
     segment<Index> line_ba() const { return {ab.b,ab.a}; }
+
+    Index p() const { return ab.a; }
+    Index sample_i() const {
+        POLY_OPS_ASSERT(type == event_type_t::calc_intr_sample);
+        return ab.b;
+    }
+
+    friend bool operator==(const event &a,const event &b) {
+        return a.type == b.type && a.ab == b.ab;
+    }
 };
 
 // This refers to a 1-dimensional edge, i.e. the start or end of a line segment
 enum class at_edge_t {
     start = -1,
     no = 0,
-    end = 1};
+    end = 1,
+
+    /* "both" is a special case that is only used for perfectly overlapping line
+    segments */
+    both = 2};
 
 template<typename Coord> at_edge_t is_edge(Coord val,Coord end_val) {
     if(val == 0) return at_edge_t::start;
@@ -473,10 +509,115 @@ template<typename Coord> at_edge_t is_edge(Coord val,Coord end_val) {
     return at_edge_t::no;
 }
 
+template<typename T> bool between(T x,T lo,T hi) {
+    return x > lo && x < hi;
+}
+
+template<typename Index,typename Coord>
+bool intersects_parallel(segment<Index> s1,segment<Index> s2,const loop_point<Index,Coord> *points,point_t<Coord> &p,std::span<at_edge_t,2> at_edge) {
+    using long_t = long_coord_t<Coord>;
+    using std::swap;
+
+    if(triangle_winding(points[s1.a].data,points[s1.b].data,points[s2.a].data) != 0) return false;
+
+    /* Reduce each line segment into a 1D value. Each d* value is the scalar
+    projection of the corresponding s*.* point times the magnitude of s1. */
+    point_t<long_t> v1b = vcast<long_t>(points[s1.b].data-points[s1.a].data);
+    long_t d1a = static_cast<long_t>(0);
+    long_t d1b = square(v1b);
+    long_t d2a = vdot(points[s2.a].data-points[s1.a].data,v1b);
+    long_t d2b = vdot(points[s2.b].data-points[s1.a].data,v1b);
+
+    POLY_OPS_ASSERT(0 != d1b && d2a != d2b);
+
+    auto [lo1,hi1] = std::minmax(d1a,d1b);
+    auto [lo2,hi2] = std::minmax(d2a,d2b);
+
+    if(between(d1a,lo2,hi2)) {
+        p = points[s1.a].data;
+        at_edge[0] = at_edge_t::start;
+        at_edge[1] = at_edge_t::no;
+        return true;
+    }
+    if(between(d1b,lo2,hi2)) {
+        p = points[s1.b].data;
+        at_edge[0] = at_edge_t::end;
+        at_edge[1] = at_edge_t::no;
+        return true;
+    }
+    if(between(d2a,lo1,hi1)) {
+        p = points[s2.a].data;
+        at_edge[0] = at_edge_t::no;
+        at_edge[1] = at_edge_t::start;
+        return true;
+    }
+    if(between(d2b,lo1,hi1)) {
+        p = points[s2.b].data;
+        at_edge[0] = at_edge_t::no;
+        at_edge[1] = at_edge_t::end;
+        return true;
+    }
+
+    // see "intersects()" for an explanation of this case
+    if(lo1 == lo2 && hi1 == hi2) {
+        if(d1a == d2a) {
+            if(s1.a == s2.a) {
+                if(s1.b != s2.b) {
+                    p = points[s1.b].data;
+                    at_edge[0] = at_edge_t::end;
+                    at_edge[1] = at_edge_t::end;
+                    return true;
+                }
+            } else if(s1.b == s2.b) {
+                p = points[s1.a].data;
+                at_edge[0] = at_edge_t::start;
+                at_edge[1] = at_edge_t::start;
+                return true;
+            } else {
+                at_edge[0] = at_edge_t::both;
+                at_edge[1] = at_edge_t::start;
+                return true;
+            }
+        } else {
+            if(s1.a == s2.b) {
+                if(s1.b != s2.a) {
+                    p = points[s1.b].data;
+                    at_edge[0] = at_edge_t::end;
+                    at_edge[1] = at_edge_t::start;
+                    return true;
+                }
+            } else if(s1.b == s2.a) {
+                p = points[s1.a].data;
+                at_edge[0] = at_edge_t::start;
+                at_edge[1] = at_edge_t::end;
+                return true;
+            } else {
+                at_edge[0] = at_edge_t::both;
+                at_edge[1] = at_edge_t::end;
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 /* Check if two line segments intersect.
 
-Returns "true" if the lines intersect at a single point, and that point is not
-an endpoint for at least one of the lines. */
+Returns "true" if the lines intersect. Adjecent lines do not count as
+intersecting.
+
+'p' will be set to the point of intersection, or in the case of coincident
+lines, 'p' will be one of the end points that is inside the other line (if both
+ends are inside the other segment, one end is chosen arbitrarily).
+
+Perfectly overlapping lines is a special case. Partially overlapping lines will
+need to be broken and they are consequently re-added to the event list to be
+tested again (both lines are added even if only one needs to be broken).
+Perfectly overlapping lines do not need to be broken, thus at_edge[0] will be
+set to at_edge_t::both; at_edge[1] will be set to ::start if
+points[s1.a] == points[s2.a] and ::end otherwise. "p" will be unset. This is the
+only time the value of at_edge_t::both is used. */
 template<typename Index,typename Coord>
 bool intersects(segment<Index> s1,segment<Index> s2,const loop_point<Index,Coord> *points,point_t<Coord> &p,std::span<at_edge_t,2> at_edge) {
     using long_t = long_coord_t<Coord>;
@@ -491,9 +632,11 @@ bool intersects(segment<Index> s1,segment<Index> s2,const loop_point<Index,Coord
     Coord y4 = s2.b_y(points);
 
     long_t d = static_cast<long_t>(x1-x2)*(y3-y4) - static_cast<long_t>(y1-y2)*(x3-x4);
-    if(d == 0) return false;
+    if(d == 0) return intersects_parallel(s1,s2,points,p,at_edge);
 
-    // connected lines do not count as intersecting
+    /* Connected lines do not count as intersecting. This check must be done
+    after checking for parallel lines because coincident lines can have more
+    than one point of intersection. */
     if(s1.a == s2.a || s1.a == s2.b || s1.b == s2.a || s1.b == s2.b) return false;
 
     long_t t_i = static_cast<long_t>(x1-x3)*(y3-y4) - static_cast<long_t>(y1-y3)*(x3-x4);
@@ -541,7 +684,7 @@ bool intersects(segment<Index> s1,segment<Index> s2,const loop_point<Index,Coord
         else if(p[0] == x4 && p[1] == y4) at_edge[1] = at_edge_t::end;
     }
 
-    return at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no;
+    return true;
 }
 
 template<typename Coord>
@@ -553,19 +696,18 @@ bool lower_angle(point_t<Coord> ds,point_t<Coord> dp,bool tie_breaker) {
 
 template<typename Coord>
 bool vert_overlap(point_t<Coord> sa,point_t<Coord> sb,point_t<Coord> p,point_t<Coord> dp,bool tie_breaker) {
-    Coord ya = sa.y();
-    Coord yb = sb.y();
-    if(ya > yb) std::swap(ya,yb);
+    /* If both line segments are vertical, two assumptions are made: they either
+    overlap completely or not at all, and 'sb' comes directly after 'sa' in the
+    loop. */
     return
         tie_breaker &&
         dp.x() == 0 &&
-        (p.y() == (dp.y() > 0 ? ya : yb));
+        (dp.y() > 0) == (sb.y() > sa.y()) &&
+        p.y() == sa.y();
 }
 
 /* Determine if a ray at point 'p' intersects with line segment 'sa-sb'. The ray
 is vertical and extends toward negative infinity.
-
-'sa-sb' must not be a vertical line.
 
 If 'p' has the same X coordinate as one of the end-points of 'sa-sb', it does
 not intersect if the X coordinate of the other end-point of 'sa-sb' is smaller
@@ -574,8 +716,8 @@ greater and 'hsign' is negative, or if the X coordinates are the same. A
 vertical line will never intersect.
 
 If 'p' has the same coordinates as one of the end-points of 'sa-sb', it does not
-intersect if the Y coordinate of the other end-point of 'sa-sb' is greater than
-or equal to the Y coordinate of 'p'. */
+intersect if --TODO: think of a succinct way to describe this--.
+*/
 template<typename Coord> bool line_segment_up_ray_intersection(
     point_t<Coord> sa,
     point_t<Coord> sb,
@@ -689,7 +831,7 @@ template<typename Index,typename Coord> class dual_line_balance {
 
     If our line is vertical, 'hsign' should be negative if our line points up,
     and positive if it points down (lines of zero length should have been
-    eliminated in a proir step). */
+    eliminated in a prior step). */
 
     const loop_point<Index,Coord> *points;
     Index p1, p2;
@@ -781,18 +923,19 @@ public:
 This is similar to "dual_line_balance" except it only tests a line with one
 origin point.
 */
-template<typename Index,typename Coord> class line_ray_intersections {
+template<typename Index,typename Coord> class line_balance {
     const loop_point<Index,Coord> *points;
     Index p1;
     std::pmr::vector<Index> &intrs_tmp;
     point_t<Coord> dp1;
     Coord hsign;
+    int wn;
 
 public:
-    line_ray_intersections(const loop_point<Index,Coord> *points,Index p1,std::pmr::vector<Index> &intrs_tmp) :
+    line_balance(const loop_point<Index,Coord> *points,Index p1,std::pmr::vector<Index> &intrs_tmp) :
         points(points), p1(p1), intrs_tmp(intrs_tmp),
-        dp1(points[points[p1].next].data - points[p1].data),
-        hsign(dp1.x() ? dp1.x() : dp1.y())
+        dp1(line_delta(points,p1)),
+        hsign(hsign_of(dp1)), wn(dp1.x() < 0 ? -1 : 0)
     {
         POLY_OPS_ASSERT(hsign);
     }
@@ -813,10 +956,13 @@ public:
                 dp1,
                 main_i > p1))
             {
+                wn += a_is_main ? 1 : -1;
                 intrs_tmp.push_back(main_i);
             }
         }
     }
+
+    int result() const { return wn; }
 };
 
 /* order events by the X coordinates increasing and then by event type */
@@ -843,7 +989,7 @@ template<typename Index,typename Coord> class events_t {
 
     std::pmr::vector<event<Index>> events;
     std::pmr::vector<to_insert> new_events;
-    std::size_t current_i;
+    std::ptrdiff_t current_i;
     std::size_t last_size;
 
     void incorporate_new(points_ref points) {
@@ -872,9 +1018,9 @@ public:
         auto itr = std::lower_bound(
             events.begin(),
             events.begin()+upto,
-            event<Index>{s,type,false},
+            event<Index>{s,type},
             cmp{points});
-        POLY_OPS_ASSERT(itr != (events.begin()+last_size) && itr->ab == s && itr->type == type);
+        POLY_OPS_ASSERT(itr != (events.begin()+upto) && itr->ab == s && itr->type == type);
         return *itr;
     }
 
@@ -882,15 +1028,21 @@ public:
         return find(points,s,type,last_size);
     }
 
+    std::ptrdiff_t event_ssize() const {
+        return static_cast<std::ptrdiff_t>(events.size());
+    }
+
     bool more() const {
-        return current_i < events.size();
+        return (current_i+1) < event_ssize() || !new_events.empty();
     }
 
     std::tuple<event<Index>,bool> next(points_ref points) {
-        POLY_OPS_ASSERT(current_i < events.size());
+        POLY_OPS_ASSERT(current_i < event_ssize());
 
         if(!new_events.empty()) {
-            if(current_i >= new_events[0].i) return {events[--current_i],false};
+            --current_i;
+            // backtrack to before the first insertion
+            if(current_i >= static_cast<std::ptrdiff_t>(new_events[0].i)) return {events[current_i],false};
 
             incorporate_new(points);
         } else if(events.size() > last_size) {
@@ -898,17 +1050,27 @@ public:
                 std::ranges::sort(events,cmp{points});
                 last_size = events.size();
             } else {
-                /* if there are new items at the end, move them to their sorted
-                position */
+                /* if there are new items at the end, find their sorted position
+                and move them to "new_events" */
                 std::size_t new_count = events.size() - last_size;
-                new_events.resize(new_count);
+                new_events.reserve(new_count);
                 for(std::size_t i=0; i<new_count; ++i) {
-                    new_events[i].e = std::move(events[last_size+i]);
-                    new_events[i].i = std::lower_bound(
+                    auto itr = std::lower_bound(
                         events.begin(),
                         events.begin()+last_size,
-                        new_events[i].e,
-                        cmp{points}) - events.begin();
+                        events[last_size+i],
+                        cmp{points});
+                    
+                    /* The event might be a duplicate. This only happens with
+                    "calc_balance_intr" events when finding unconnected lines
+                    that have touching end-points, but if we have to repeatedly
+                    backtrack, the event would be repeatedly added. */
+                    if(itr == events.begin()+last_size || *itr != events[last_size+i]) {
+                        new_events.emplace_back(std::move(events[last_size+i]),static_cast<std::size_t>(itr - events.begin()));
+                    }
+                }
+                if(new_events.size() != new_count) {
+                    events.resize(last_size + new_events.size());
                 }
                 std::ranges::sort(
                     new_events,
@@ -916,9 +1078,10 @@ public:
                         if(a.i != b.i) return a.i < b.i;
                         return cmp{points}(a.e,b.e);
                     });
-                for(std::size_t i=0; i<new_count; ++i) new_events[i].i += i;
+                for(std::size_t i=0; i<new_events.size(); ++i) new_events[i].i += i;
 
-                if(new_events[0].i <= current_i) return {current(),false};
+                // backtrack to before the first insertion
+                if(static_cast<std::ptrdiff_t>(new_events[0].i) <= current_i) return {current(),false};
 
                 incorporate_new(points);
             }
@@ -928,13 +1091,16 @@ public:
     }
 
     void add_event(Index sa,Index sb,event_type_t t) {
-        events.emplace_back(segment<Index>{sa,sb},t,false);
+        events.emplace_back(segment<Index>{sa,sb},t);
     }
 
     void add_fb_events(points_ref points,Index sa,Index sb) {
         auto f = event_type_t::forward;
         auto b = event_type_t::backward;
         if(points[sa].data[0] == points[sb].data[0]) {
+            /* this is an assumption made by vert_overlap() */
+            POLY_OPS_ASSERT(points[sa].next == sb);
+
             f = event_type_t::vforward;
             b = event_type_t::vbackward;
         }
@@ -953,7 +1119,7 @@ public:
             | std::views::filter([](const event<Index> &e) {
                 return (e.type == event_type_t::backward
                     || e.type == event_type_t::vbackward)
-                    && !e.deleted; })
+                    && e.status != event_status_t::deleted; })
             | std::views::take_while(
                 [x,&points](const event<Index> &e) { return x == e.ab.a_x(points); })
             | std::views::transform([](const event<Index> &e) { return e.line_ba(); });
@@ -973,6 +1139,11 @@ public:
 
     event<Index> &current() { return events[current_i]; }
     const event<Index> &current() const { return events[current_i]; }
+
+    /* these are used by graphical_test_common.hpp of the testing code */
+    auto begin() const { return events.begin(); }
+    auto end() const { return events.end(); }
+    std::size_t size() const { return events.size(); }
 };
 
 /* Line segments are ordered by whether they are "above" other segments or not.
@@ -999,6 +1170,10 @@ template<typename Index,typename Coord> struct sweep_cmp {
             if(r) return r > 0;
             long_coord_t<Coord> r2 = winding(s1.a,s1.b,s2.b);
             if(r2) return r2 > 0;
+            /* the lines are coincident and have the same start point but they
+            might be pointing away from each other */
+            r = s1.b_y(lpoints) - s2.b_y(lpoints);
+            if(r) return r > 0;
         } else if(s1.a_x(lpoints) < s2.a_x(lpoints)) {
             if(s1.a_x(lpoints) != s1.b_x(lpoints)) {
                 long_coord_t<Coord> r = winding(s1.a,s1.b,s2.a);
@@ -1042,6 +1217,8 @@ Index split_segment(
     const point_t<Coord> &c,
     at_edge_t at_edge)
 {
+    POLY_OPS_ASSERT(at_edge != at_edge_t::both);
+
     Index sa = s.a;
     Index sb = s.b;
 
@@ -1053,12 +1230,13 @@ Index split_segment(
     intersection point is rounded to integer coordinates. If the distance
     between the real intersection point and the edge of the line is small
     enough, but still greater than zero, that tiny nub can still affect the
-    sweep order. TODO: is this still necessary? */
+    sweep order. Additionally, overlapping lines will have two intersection
+    points but we only check for one intersection at a time. */
     sweep.erase(s);
     events.find(
         points,
         s,
-        points[sa].data[0] == points[sb].data[0] ? event_type_t::vforward : event_type_t::forward).deleted = true;
+        points[sa].data[0] == points[sb].data[0] ? event_type_t::vforward : event_type_t::forward).status = event_status_t::deleted;
 
     if(at_edge != at_edge_t::no) {
         events.add_event(
@@ -1068,24 +1246,29 @@ Index split_segment(
         return at_edge == at_edge_t::start ? sa : sb;
     }
 
+    POLY_OPS_ASSERT(points[sa].data != c && points[sb].data != c);
+
     if(!s.a_is_main(points)) std::swap(sa,sb);
 
-    points[sa].next = points.size();
+    Index mid = points.size();
+    points[sa].next = mid;
     points.emplace_back(c,sb,UNDEF_LINE_BAL);
     POLY_OPS_ASSERT_SLOW(check_integrity(points,sweep));
 
     /* even if the original line was not vertical, one of the new lines might
-    still be vertical after rounding, so the comparisons done by "add_fb_events"
-    cannot be consolidated */
-    if(points[sa].data[0] <= points[sb].data[0]) {
-        events.add_fb_events(points,sa,points[sa].next);
-        events.add_fb_events(points,points[sa].next,sb);
+    still be vertical after rounding */
+    if(points[sa].data[0] <= points[mid].data[0]) {
+        events.add_fb_events(points,sa,mid);
     } else {
-        events.add_fb_events(points,sb,points[sa].next);
-        events.add_fb_events(points,points[sa].next,sa);
+        events.add_fb_events(points,mid,sa);
+    }
+    if(points[mid].data[0] <= points[sb].data[0]) {
+        events.add_fb_events(points,mid,sb);
+    } else {
+        events.add_fb_events(points,sb,mid);
     }
 
-    return points[sa].next;
+    return mid;
 }
 
 template<typename Index,typename Coord>
@@ -1100,16 +1283,35 @@ bool check_intersection(
     point_t<Coord> intr;
     at_edge_t at_edge[2];
     if(intersects(s1,s2,points.data(),intr,at_edge)) {
-        POLY_OPS_ASSERT(at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no);
+        if(at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no) [[likely]] {
+            Index intr1 = split_segment(events,sweep,points,s1,intr,at_edge[0]);
+            Index intr2 = split_segment(events,sweep,points,s2,intr,at_edge[1]);
 
-        Index intr1 = split_segment(events,sweep,points,s1,intr,at_edge[0]);
-        Index intr2 = split_segment(events,sweep,points,s2,intr,at_edge[1]);
+            if(pt) pt->new_intersection(intr1,intr2);
 
-        events.add_event(intr1,intr2,event_type_t::calc_balance_intr);
+            events.add_event(intr1,intr2,event_type_t::calc_balance_intr);
 
-        if(pt) pt->new_intersection(intr1,intr2);
-
-        return true;
+            return true;
+        } else if(at_edge[0] == at_edge_t::both) {
+            Index b1 = s2.a;
+            Index b2 = s2.b;
+            if(at_edge[1] == at_edge_t::end) {
+                b1 = s2.b;
+                b2 = s2.a;
+            }
+            if(points[s1.a].line_bal == UNDEF_LINE_BAL || points[b1].line_bal == UNDEF_LINE_BAL) {
+                events.add_event(s1.a,b1,event_type_t::calc_balance_intr);
+            }
+            if(points[s1.b].line_bal == UNDEF_LINE_BAL || points[b2].line_bal == UNDEF_LINE_BAL) {
+                events.add_event(s1.b,b2,event_type_t::calc_balance_intr);
+            }
+        } else {
+            Index intr1 = at_edge[0] == at_edge_t::start ? s1.a : s1.b;
+            Index intr2 = at_edge[1] == at_edge_t::start ? s2.a : s2.b;
+            if(points[intr1].line_bal == UNDEF_LINE_BAL || points[intr2].line_bal == UNDEF_LINE_BAL) {
+                events.add_event(intr1,intr2,event_type_t::calc_balance_intr);
+            }
+        }
     }
 
     return false;
@@ -1122,8 +1324,7 @@ template<typename T,typename Coord> concept sized_or_forward_point_range
     = sized_or_forward_range<T> && point<std::ranges::range_value_t<T>,Coord>;
 
 template<typename T,typename Coord> concept sized_or_forward_point_range_range
-    /* It's not enought to know the size of inner_loops(). We have to iterate
-    over the loops to get their sizes. */
+    /* We have to iterate over the loops to get their sizes. */
     = std::ranges::forward_range<T> && sized_or_forward_point_range<std::ranges::range_value_t<T>,Coord>;
 
 template<typename,typename T> struct total_point_count {
@@ -1159,30 +1360,40 @@ std::tuple<std::pmr::vector<loop_point<Index,Coord>>,intr_array_t<Index>> prepar
     std::tuple<std::pmr::vector<loop_point<Index,Coord>>,intr_array_t<Index>> r{
         std::pmr::vector<loop_point<Index,Coord>>{contig_mem},
         intr_array_t<Index>{contig_mem}};
-    std::get<0>(r).reserve(total_point_count<Coord,std::remove_reference_t<Input>>::doit(input));
-    std::get<1>(r).reserve(std::ranges::size(input));
+    auto& [lpoints,to_sample] = r;
+    lpoints.reserve(total_point_count<Coord,std::remove_reference_t<Input>>::doit(input));
+    to_sample.reserve(std::ranges::size(input));
 
     Index original_i = 0;
 
     for(auto &&loop : input) {
         auto p_itr = std::ranges::begin(loop);
-        if(p_itr == std::ranges::end(loop)) continue;
+        auto itr_end = std::ranges::end(loop);
+        if(p_itr == itr_end) continue; // zero points
 
         point_t<Coord> prev = *p_itr++;
-        Index first_i = static_cast<Index>(std::get<0>(r).size());
+        if(p_itr == itr_end) continue; // only one point
+        Index first_i = static_cast<Index>(lpoints.size());
 
-        std::get<1>(r).emplace_back(first_i,std::pmr::vector<Index>(contig_mem));
-        std::get<0>(r).emplace_back(prev,static_cast<Index>(std::get<0>(r).size()+1));
-        if(pt) pt->point_added(original_i++);
-        for(point_t<Coord> p : std::ranges::subrange(p_itr,std::ranges::end(loop))) {
-            if(p != prev) {
-                prev = p;
-                std::get<0>(r).emplace_back(p,static_cast<Index>(std::get<0>(r).size()+1));
+        to_sample.emplace_back(first_i,std::pmr::vector<Index>(contig_mem));
+        lpoints.emplace_back(prev,first_i+1);
+        if(pt) pt->point_added(original_i);
+        ++original_i;
+
+        prev = *p_itr++;
+        for(point_t<Coord> p : std::ranges::subrange(p_itr,itr_end)) {
+            if(prev != lpoints.back().data) {
+                lpoints.emplace_back(prev,static_cast<Index>(lpoints.size()+1));
                 if(pt) pt->point_added(original_i);
             }
+            prev = p;
             ++original_i;
         }
-        std::get<0>(r).back().next = first_i;
+        if(prev != lpoints.back().data && prev != lpoints[first_i].data) {
+            lpoints.emplace_back(prev,0);
+            if(pt) pt->point_added(original_i);
+        }
+        lpoints.back().next = first_i;
     }
 
     return r;
@@ -1193,12 +1404,28 @@ bool intersects_any(segment<Index> s1,const sweep_t<Index,Coord> &sweep,const lo
     for(auto s2 : sweep) {
         point_t<Coord> intr;
         at_edge_t at_edge[2];
-        if(intersects(s1,s2,points,intr,at_edge)) {
-            DEBUG_STEP_BY_STEP_MISSED_INTR;
+        if(intersects(s1,s2,points,intr,at_edge) && (at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no)) {
+            POLY_OPS_DEBUG_STEP_BY_STEP_MISSED_INTR;
             return true;
         }
     }
     return false;
+}
+
+template<typename Index,typename Coord>
+bool consistent_order(const sweep_t<Index,Coord> &sweep) {
+    auto cmp = sweep.key_comp();
+    for(auto itr_a = sweep.begin(); itr_a != sweep.end(); ++itr_a) {
+        auto itr_b = sweep.begin();
+        for(; itr_b != itr_a; ++itr_b) {
+            if(cmp(*itr_a,*itr_b)) return false;
+        }
+        if(cmp(*itr_a,*itr_b++)) return false;
+        for(; itr_b != sweep.end(); ++itr_b) {
+            if(cmp(*itr_b,*itr_a)) return false;
+        }
+    }
+    return true;
 }
 
 /* This is a modified version of the Bentley–Ottmann algorithm. Lines are broken
@@ -1226,17 +1453,15 @@ intr_map_t<Index> self_intersection(
         Index j1 = i;
         Index j2 = lpoints[i].next;
 
+        /* in the case of vertical line segments, the points must retain their
+        original order due to an assumption made by vert_overlap() */
         if(lpoints[j1].data[0] > lpoints[j2].data[0]) std::swap(j1,j2);
         events.add_fb_events(lpoints,j1,j2);
     }
 
     for(Index i=0; i<samples.size(); ++i) {
         Index p = samples[i].p;
-        events.add_event(
-            i,
-            p,
-            hsign_of(line_delta(lpoints.data(),p)) < 0
-                ? event_type_t::calc_intr_sample_neg : event_type_t::calc_intr_sample_pos);
+        events.add_event(p,i,event_type_t::calc_intr_sample);
     }
 
     sweep_t<Index,Coord> sweep(sweep_cmp<Index,Coord>{lpoints},discrete_mem);
@@ -1244,8 +1469,7 @@ intr_map_t<Index> self_intersection(
     /* A sweep is done over the points. We travel from point to point from left
     to right, of each line segment. If the point is on the left side of the
     segment, the segment is added to "sweep". If the point is on the right, the
-    segment is removed from "sweep". In the case of vertical lines, left and
-    right are chosen arbitrarily. Adding to "sweep" always takes priority for
+    segment is removed from "sweep". Adding to "sweep" always takes priority for
     vertical lines, otherwise removing takes priority.
 
     In the Bentley–Ottmann algorithm, we also have to swap the order of lines in
@@ -1253,13 +1477,16 @@ intr_map_t<Index> self_intersection(
     intersection points and create new "forward" and "backward" events instead.
     */
     while(events.more()) {
+        POLY_OPS_DEBUG_ITERATION
+
         auto [e,forward] = events.next(lpoints);
 
-        if(e.deleted) continue;
+        if(e.status == event_status_t::deleted) continue;
 
-        /*POLY_OPS_ASSERT_SLOW(std::ranges::all_of(sweep,[=,&lpoints](segment<Index> s) {
-            return last_x >= s.a_x(lpoints) && last_x <= s.b_x(lpoints);
-        }));*/
+        POLY_OPS_ASSERT_SLOW(std::ranges::all_of(sweep,[&,e=e](segment<Index> s) {
+            return e.ab.a_x(lpoints) <= s.a_x(lpoints) || e.ab.a_x(lpoints) <= s.b_x(lpoints);
+        }));
+        POLY_OPS_ASSERT_SLOW(consistent_order(sweep));
 
         switch(e.type) {
         case event_type_t::forward:
@@ -1267,13 +1494,14 @@ intr_map_t<Index> self_intersection(
             if(forward) {
                 auto itr = std::get<0>(sweep.insert(e.ab));
 
-                DEBUG_STEP_BY_STEP_EVENT_F;
+                POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F
 
                 if(itr != sweep.begin() && check_intersection(events,sweep,lpoints,e.ab,*std::prev(itr),pt)) continue;
                 ++itr;
                 if(itr != sweep.end()) check_intersection(events,sweep,lpoints,e.ab,*itr,pt);
             } else {
                 sweep.erase(e.ab);
+                POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_FR
             }
             break;
         case event_type_t::backward:
@@ -1285,7 +1513,7 @@ intr_map_t<Index> self_intersection(
                 if(itr != sweep.end()) {
                     itr = sweep.erase(itr);
 
-                    DEBUG_STEP_BY_STEP_EVENT_B;
+                    POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_B
 
                     if(itr != sweep.end() && itr != sweep.begin()) {
                         check_intersection(events,sweep,lpoints,*std::prev(itr),*itr,pt);
@@ -1293,10 +1521,11 @@ intr_map_t<Index> self_intersection(
 
                     POLY_OPS_ASSERT_SLOW(!intersects_any(e.line_ba(),sweep,lpoints.data()));
                 } else {
-                    events.current().deleted = true;
+                    events.current().status = event_status_t::deleted;
                 }
             } else {
                 sweep.insert(events.current_start(lpoints).ab);
+                POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_BR
             }
             break;
         case event_type_t::calc_balance_intr:
@@ -1314,16 +1543,18 @@ intr_map_t<Index> self_intersection(
                     lpoints[e.ab.a].line_bal,
                     lpoints[e.ab.b].line_bal) = lb.result();
 
-                DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE;
+                POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE
 
                 intrs.emplace(e.ab.a,std::pmr::vector<Index>(intrs_tmp[0],contig_mem));
                 intrs.emplace(e.ab.b,std::pmr::vector<Index>(intrs_tmp[1],contig_mem));
                 intrs_tmp[0].resize(0);
                 intrs_tmp[1].resize(0);
+            } else {
+                intrs.erase(e.ab.a);
+                intrs.erase(e.ab.b);
             }
             break;
-        case event_type_t::calc_intr_sample_neg:
-        case event_type_t::calc_intr_sample_pos:
+        case event_type_t::calc_intr_sample:
             if(forward) {
                 /* This event has nothing to with the Bentley–Ottmann algorithm.
                 Instead of assuming that all holes are completely contained by
@@ -1331,10 +1562,14 @@ intr_map_t<Index> self_intersection(
                 points for which we will calculate the enclosure heirarchy (the
                 other points are in "intrs"). */
 
-                line_ray_intersections<Index,Coord> li{lpoints.data(),e.ab.b,samples[e.ab.a].hits};
-                for(const segment<Index> &s : sweep) li.check(s);
+                line_balance<Index,Coord> lb{lpoints.data(),e.p(),samples[e.sample_i()].hits};
+                for(const segment<Index> &s : sweep) lb.check(s);
+                for(segment<Index> s : events.touching_removed(lpoints)) lb.check(s);
+                lpoints[e.p()].line_bal = lb.result();
+
+                POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_SAMPLE
             } else {
-                samples[e.ab.a].hits.resize(0);
+                samples[e.sample_i()].hits.resize(0);
             }
             break;
         }
@@ -1532,13 +1767,18 @@ std::tuple<std::pmr::vector<temp_polygon<Index>>,intr_map_t<Index>> normalize_po
     for(auto intr : intrs | std::views::keys) {
         follow_balance<Index,Coord>(lpoints.data(),intr,broken_ends,broken_starts,pt);
     }
-    for(auto intr : to_sample) {
-        if(lpoints[intr.p].line_bal == UNDEF_LINE_BAL)
+#if POLY_OPS_GRAPHICAL_DEBUG
+    if(mc__) mc__->console_line_stream() << "broken_starts: " << pp(broken_starts,0) << "\nbroken_ends: " << pp(broken_ends,0);
+#endif
+    for(const auto &intr : to_sample) {
+        // follow_balance must not be called with the same point twice
+        if(!intrs.contains(intr.p)) {
             follow_balance<Index,Coord>(lpoints.data(),intr.p,broken_ends,broken_starts,pt);
+        }
     }
 
 #if POLY_OPS_GRAPHICAL_DEBUG
-    if(mc__) mc__->console_line_stream() << "broken_starts: " << pp(broken_starts) << "\nbroken_ends: " << pp(broken_ends);
+    if(mc__) mc__->console_line_stream() << "broken_starts: " << pp(broken_starts,0) << "\nbroken_ends: " << pp(broken_ends,0);
     delegate_drawing_trimmed(lpoints);
 #endif
 
@@ -1558,7 +1798,7 @@ std::tuple<std::pmr::vector<temp_polygon<Index>>,intr_map_t<Index>> normalize_po
     POLY_OPS_ASSERT(std::all_of(
         broken_starts.begin(),
         broken_starts.end(),
-        [](const broken_starts_t<Index,Coord>::value_type &v) { return std::get<1>(v).empty(); }));
+        [](const typename broken_starts_t<Index,Coord>::value_type &v) { return std::get<1>(v).empty(); }));
 
     /*if(pt) {
         // TODO: is this already done in the previous step?
@@ -1779,11 +2019,13 @@ normalize(
 
 } // namespace poly_ops
 
-#undef DEBUG_STEP_BY_STEP_EVENT_F
-#undef DEBUG_STEP_BY_STEP_EVENT_B
-#undef DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE
-#undef DEBUG_STEP_BY_STEP_LB_CHECK_RET_TYPE
-#undef DEBUG_STEP_BY_STEP_LB_CHECK_RETURN
-#undef DEBUG_STEP_BY_STEP_LB_CHECK_FF
+#undef POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F
+#undef POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_FR
+#undef POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_B
+#undef POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_BR
+#undef POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE
+#undef POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_SAMPLE
+#undef POLY_OPS_DEBUG_STEP_BY_STEP_MISSED_INTR
+#undef POLY_OPS_DEBUG_ITERATION
 
 #endif

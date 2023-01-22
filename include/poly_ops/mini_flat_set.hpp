@@ -6,7 +6,12 @@
 #include <type_traits>
 #include <iterator>
 #include <vector>
+
+
+#ifndef POLY_OPS_ASSERT
 #include <cassert>
+#define POLY_OPS_ASSERT assert
+#endif
 
 namespace poly_ops::detail {
 
@@ -45,7 +50,7 @@ class mini_flat_set {
 
     template<std::input_iterator InputIt>
     T *create_items(Allocator &alloc,InputIt first,InputIt last) {
-        assert(_size == 1);
+        POLY_OPS_ASSERT(_size == 1);
 
         T tmp = u.item;
         u.data = alloc_data(alloc,2);
@@ -58,7 +63,7 @@ class mini_flat_set {
 
     template<std::forward_iterator InputIt>
     T *create_items(Allocator &alloc,InputIt first,InputIt last) {
-        assert(_size == 1);
+        POLY_OPS_ASSERT(_size == 1);
 
         auto isize = std::distance(first,last);
 
@@ -70,7 +75,7 @@ class mini_flat_set {
 
     template<std::input_iterator InputIt>
     T *append_items(Allocator &alloc,InputIt first,InputIt last) {
-        assert(_size > 1);
+        POLY_OPS_ASSERT(_size > 1);
 
         size_t total = _size;
         for(; first != last; ++first) {
@@ -87,7 +92,7 @@ class mini_flat_set {
 
     template<std::forward_iterator InputIt>
     T *append_items(Allocator &alloc,InputIt first,InputIt last) {
-        assert(_size > 1);
+        POLY_OPS_ASSERT(_size > 1);
 
         auto isize = std::distance(first,last);
 
@@ -152,14 +157,7 @@ public:
 
     void destroy(Allocator alloc) {
         if(_size > 1) dealloc_data(alloc,u.data);
-    #ifndef NDEBUG
-        _size = 0;
-    #endif
     }
-
-#ifndef NDEBUG
-    ~mini_flat_set() { assert(_size == 0); }
-#endif
 
     size_t size() const noexcept { return _size; }
     bool empty() const noexcept { return _size != 0; }
@@ -264,12 +262,12 @@ public:
     }
 
     mini_flat_set_alloc_proxy &operator=(const mini_flat_set_alloc_proxy &b) const {
-        assert(alloc == b.alloc);
+        POLY_OPS_ASSERT(alloc == b.alloc);
         data.assign(alloc,b.data);
         return *this;
     }
     mini_flat_set_alloc_proxy &operator=(mini_flat_set_alloc_proxy &&b) {
-        assert(alloc == b.alloc);
+        POLY_OPS_ASSERT(alloc == b.alloc);
         data.assign(alloc,std::move(b.data));
         return *this;
     }
@@ -329,11 +327,11 @@ template<typename Alloc1,typename T2> struct two_tier_allocator_adapter : public
         return *this;
     }
 
-    template<typename... Args> void construct(Alloc1::value_type *x,Args&&... args) {
+    template<typename... Args> void construct(typename Alloc1::value_type *x,Args&&... args) {
         alloc1_traits::construct(*this,x,alloc2,std::forward<Args>(args)...);
     }
 
-    void destroy(Alloc1::value_type *x) {
+    void destroy(typename Alloc1::value_type *x) {
         x->destroy(alloc2);
         alloc1_traits::destroy(*this,x);
     }
