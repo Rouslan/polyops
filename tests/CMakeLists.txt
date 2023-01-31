@@ -15,7 +15,7 @@ else()
 endif()
 
 add_library(websocket_server SHARED server.cpp)
-target_include_directories(websocket_server PRIVATE Boost::boost PUBLIC Threads::Threads)
+target_link_libraries(websocket_server PRIVATE Boost::boost PUBLIC Threads::Threads)
 
 add_executable(random_shapes random_shapes.cpp)
 target_link_libraries(random_shapes websocket_server)

@@ -7,6 +7,7 @@
 #include <memory>
 #include <cstring>
 #include <chrono>
+#include <charconv>
 
 #include "server.hpp"
 
@@ -95,6 +96,7 @@ std::ostream &operator<<(std::ostream &os,const test_failure &f) {
     return f.emit(os);
 }
 
+thread_local size_t increment_amount;
 thread_local message_canvas *mc__ = nullptr;
 bool graphical_debug = false;
 bool timeout = false;
@@ -261,6 +263,33 @@ auto to_json_value(const draw_point &p) {
     }
 }*/
 
+class tokenizer {
+    std::u8string_view input;
+
+public:
+    tokenizer(std::u8string_view input) : input(input) {}
+
+    std::u8string_view operator()() {
+        for(;;) {
+            if(input.empty()) return input;
+            char8_t c = input.front();
+            if(!(c == ' ' || c == '\t' || c == '\n' || c == '\r')) break;
+            input.remove_prefix(1);
+        }
+        for(size_t s=1; s<input.size(); ++s) {
+            char8_t c = input[s];
+            if(c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+                std::u8string_view r{input.data(),s};
+                input.remove_prefix(s);
+                return r;
+            }
+        }
+        auto r = input;
+        input.remove_prefix(input.size());
+        return r;
+    }
+};
+
 template<typename Sweep> void delegate_drawing(
     const std::pmr::vector<detail::loop_point<index_t,coord_t>> &lpoints,
     const Sweep &sweep,
@@ -289,12 +318,25 @@ template<typename Sweep> void delegate_drawing(
         json::attr("currentPoint") = json::array_range(lpoints[e.ab.a].data),
         json::attr("indexedLineCount") = lpoints.size()));
 
-    for(;;) {
-        std::u8string_view msg = mc__->get_text();
-        if(msg == u8"continue"sv) {
-            break;
-        } else throw std::runtime_error("unexpected command received from client");
+    if(!increment_amount) {
+        for(;;) {
+            tokenizer tok(mc__->get_text());
+            std::u8string_view msg = tok();
+            if(msg == u8"continue"sv) {
+                auto inc_str = tok();
+                if(inc_str.empty()) increment_amount = 1;
+                else {
+                    const char *start = reinterpret_cast<const char*>(inc_str.data());
+                    const char *end = start+inc_str.size();
+                    auto r = std::from_chars(start,end,increment_amount);
+                    if(r.ptr != end || !tok().empty())
+                        throw std::runtime_error("invalid command arguments");
+                }
+                if(increment_amount) break;
+            } else throw std::runtime_error("unexpected command received from client");
+        }
     }
+    --increment_amount;
 }
 
 void delegate_drawing_trimmed(

@@ -1,5 +1,6 @@
 
 #define BOOST_BEAST_USE_STD_STRING_VIEW 1
+#define BOOST_ASIO_HAS_STD_INVOKE_RESULT
 #define SERVER_CPP
 
 #include <boost/predef.h>

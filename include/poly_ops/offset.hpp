@@ -234,7 +234,7 @@ struct offset_polygon_point {
             // it's concave so we need to approximate an arc
 
             real_coord_t<Coord> angle = coord_ops<Coord>::pi() - vangle<Coord>(p1-p2,p3-p2);
-            Coord steps = coord_ops<Coord>::floor(magnitude * angle / arc_step_size);
+            Coord steps = coord_ops<Coord>::to_coord(magnitude * angle / arc_step_size);
             long lsteps = std::abs(static_cast<long>(steps));
             if(lsteps > 1) {
                 real_coord_t<Coord> s = coord_ops<Coord>::sin(angle / steps);

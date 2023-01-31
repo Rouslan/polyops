@@ -127,6 +127,7 @@ export default function (inputCoords=null) {
     const socketOExtra = document.getElementById('socketOExtra');
     const statusBar = document.getElementById('statusbar');
     const zoomValue = document.getElementById('zoomValue');
+    const incrementAmount = document.getElementById('incrementamount');
     const buttons = [];
     let invViewTransform;
     let viewScale = 1;
@@ -479,7 +480,14 @@ export default function (inputCoords=null) {
 
         let b = document.getElementById('bContinue');
         buttons.push(b);
-        b.onclick = e => { ws.send('continue'); };
+        b.onclick = e => {
+            let inc = incrementAmount.valueAsNumber;
+
+            // !>= is used instead of < to catch NaN
+            if(!(inc >= 1)) inc = 1;
+            else inc = Math.trunc(inc)
+            ws.send(`continue ${inc}`);
+        };
     } catch(e) {
         addLine('error',"error: " + e.message);
     }

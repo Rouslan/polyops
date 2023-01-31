@@ -55,6 +55,7 @@ int run_my_message_server(const settings_t &settings,std::span<const std::vector
     graphical_debug = true;
     try {
         run_message_server(settings.htmlfile.get(),settings.supportdir.get(),[=,&settings](message_canvas &mc) {
+            increment_amount = 0;
             mc__ = &mc;
             if(i != -1) mc.console_line_stream() << "failure on iteration " << i;
             try {
