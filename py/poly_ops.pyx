@@ -1,4 +1,4 @@
-#cython: language_level=3
+#cython: language_level=3, boundscheck=False, wraparound=False
 #distutils: language = c++
 
 import numpy as np
@@ -32,11 +32,13 @@ cdef extern from *:
         std::ptrdiff_t major_stride;
     };
 
+    constexpr auto to_range = [](const loop_entry &e) {
+        return poly_ops::blob_to_point_range<std::int32_t>(
+            e.data,e.minor_stride,e.major_stride,e.major_size);
+    };
+
     auto loop_vector_to_ranges(const std::vector<loop_entry> &loops) {
-        return loops | std::views::transform([](const loop_entry &e) {
-                return poly_ops::blob_to_point_range<std::int32_t>(
-                    e.data,e.minor_stride,e.major_stride,e.major_size);
-            });
+        return loops | std::views::transform(to_range);
     }
 
     PyObject *poly_proxy_to_py(const temp_poly_proxy &x) noexcept {
@@ -137,6 +139,11 @@ cdef extern from *:
             return unexpected_exc();
         }
     }
+
+    long _winding_dir(const loop_entry &e) {
+        gil_unlocker unlocker;
+        return poly_ops::winding_dir<std::int32_t>(to_range(e));
+    }
     """
     struct loop_entry:
         const char *data
@@ -146,35 +153,42 @@ cdef extern from *:
 
     object _normalize_tree(const vector[loop_entry]&)
     object _normalize_flat(const vector[loop_entry]&)
+    long _winding_dir(const loop_entry&)
 
-@cython.boundscheck(False)
-@cython.wraparound(False)
+
+cdef array_to_loop_entry(loop_entry &e,object a):
+    cdef np.ndarray[np.int32_t,ndim=2] loop
+    loop = <np.ndarray[np.int32_t,ndim=2]?>a
+    if loop.shape[1] != 2:
+        raise TypeError()
+
+    e.data = np.PyArray_BYTES(loop)
+    e.major_size = loop.shape[0]
+    e.minor_stride = loop.strides[1]
+    e.major_stride = loop.strides[0]
+
 cdef py_to_cpp_loops(object loops,vector[loop_entry] &out):
+    cdef loop_entry e
     # we need to keep references to the arrays
     cdef tuple loops_tup = tuple(loops)
 
     cdef np.ndarray[np.int32_t,ndim=2] loop
-    for loop_ in loops_tup:
-        loop = <np.ndarray[np.int32_t,ndim=2]?>loop_
-        if loop.shape[1] != 2:
-            raise TypeError()
-        out.push_back(loop_entry(
-            np.PyArray_BYTES(loop),
-            loop.shape[0],
-            loop.strides[1],
-            loop.strides[0]))
+    for loop in loops_tup:
+        array_to_loop_entry(e,loop)
+        out.push_back(e)
     return loops_tup
 
-@cython.boundscheck(False)
-@cython.wraparound(False)
 def normalize_tree(loops):
     cdef vector[loop_entry] c_loops
     tmp = py_to_cpp_loops(loops,c_loops)
     return _normalize_tree(c_loops)
 
-@cython.boundscheck(False)
-@cython.wraparound(False)
 def normalize_flat(loops):
     cdef vector[loop_entry] c_loops
     tmp = py_to_cpp_loops(loops,c_loops)
     return _normalize_flat(c_loops)
+
+def winding_dir(loop):
+    cdef loop_entry e
+    array_to_loop_entry(e,loop)
+    return _winding_dir(e)

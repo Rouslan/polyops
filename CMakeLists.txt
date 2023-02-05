@@ -25,3 +25,4 @@ target_link_libraries(poly_ops PRIVATE Python3::Module Python3::NumPy)
 target_include_directories(poly_ops PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 add_subdirectory(tests)
+add_subdirectory(example)

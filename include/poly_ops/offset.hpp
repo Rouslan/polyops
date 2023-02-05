@@ -78,7 +78,7 @@ All lines that have a non-zero "line balance" are removed.
 #include <ranges>
 
 #include "mini_flat_set.hpp"
-#include "base.hpp"
+#include "normalize.hpp"
 
 
 namespace poly_ops {
@@ -337,7 +337,7 @@ std::tuple<std::pmr::vector<loop_point<Index,Coord>>,intr_array_t<Index>> offset
 
 } // namespace detail
 
-template<bool TreeOut,std::integral Index,detail::coordinate Coord,point_range_range<Coord> Input>
+template<bool TreeOut,std::integral Index,coordinate Coord,point_range_range<Coord> Input>
 std::conditional_t<TreeOut,
     temp_polygon_tree_range<Index,Coord>,
     temp_polygon_range<Index,Coord>>
@@ -360,7 +360,7 @@ offset(
         pt);
 }
 
-template<bool TreeOut,std::integral Index,detail::coordinate Coord,point_range_range<Coord> Input>
+template<bool TreeOut,std::integral Index,coordinate Coord,point_range_range<Coord> Input>
 std::conditional_t<TreeOut,
     temp_polygon_tree_range<Index,Coord>,
     temp_polygon_range<Index,Coord>>
