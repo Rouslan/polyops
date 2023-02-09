@@ -46,6 +46,8 @@ template<typename Coord> struct coord_ops {
     numbers, the value needs to be converted to an integer to use in a loop */
     static Coord to_coord(real_t x) { return static_cast<Coord>(x); }
 
+    static real_t unit(real_t x) { return std::copysign(1.0,x); }
+
     static real_t pi() { return std::numbers::pi_v<real_t>; }
 };
 

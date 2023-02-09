@@ -1,5 +1,4 @@
 
-#include <exception>
 #include <vector>
 #include <fstream>
 #include <iostream>
@@ -57,17 +56,11 @@ struct satellite {
     loops_t loops;
     orbit orb;
 
-    satellite() = default;
-    satellite(const orbit &o) : orb(o) {}
+    satellite(loops_t &&loops,const orbit &o) : loops(std::move(loops)), orb(o) {}
     satellite(satellite&&) = default;
 };
 
 using shapes_t = std::vector<satellite>;
-
-shapes_t shapes;
-loops_t center_shape;
-std::vector<std::vector<SDL_FPoint>> line_buffer;
-
 
 auto offset_loop(const std::vector<poly_ops::point_t<coord_t>> &loop,poly_ops::point_t<coord_t> offset) {
     offset[0] += 3000;
@@ -75,37 +68,43 @@ auto offset_loop(const std::vector<poly_ops::point_t<coord_t>> &loop,poly_ops::p
     return loop | std::views::transform([=](auto &p) { return p + offset; });
 }
 
-void update_scene(double delta) {
-    line_buffer.clear();
+struct scene {
+    std::vector<satellite> shapes;
+    loops_t center_shape;
+    std::vector<std::vector<SDL_FPoint>> line_buffer;
 
-    /* instead of allocating memory for each transformed input loop, we pass
-    range views */
-    std::vector<decltype(offset_loop(shapes[0].loops[0],{}))> input;
-    for(auto &shape : shapes) {
-        auto offset = shape.orb(delta);
-        for(auto &loop : shape.loops) {
-            input.push_back(offset_loop(loop,offset));
+    void update(double delta) {
+        line_buffer.clear();
+
+        /* instead of allocating memory for each transformed input loop, we pass
+        range views */
+        std::vector<decltype(offset_loop(shapes[0].loops[0],{}))> input;
+        for(auto &shape : shapes) {
+            auto offset = shape.orb(delta);
+            for(auto &loop : shape.loops) {
+                input.push_back(offset_loop(loop,offset));
+            }
+        }
+
+        for(auto &loop : center_shape) {
+            input.push_back(offset_loop(loop,{0,0}));
+        }
+
+        auto loops = poly_ops::normalize<false,index_t,coord_t>(input);
+
+        for(auto &&loop : loops) {
+            assert(loop.size());
+
+            line_buffer.emplace_back();
+            line_buffer.back().reserve(loop.size()+1);
+            for(auto &p : loop) line_buffer.back().emplace_back(p[0]/10.0f,p[1]/10.0f);
+            auto first = *loop.begin();
+            line_buffer.back().emplace_back(first[0]/10.0f,first[1]/10.0f);
         }
     }
+};
 
-    for(auto &loop : center_shape) {
-        input.push_back(offset_loop(loop,{0,0}));
-    }
-
-    auto loops = poly_ops::normalize<false,index_t,coord_t>(input);
-
-    for(auto &&loop : loops) {
-        assert(loop.size());
-
-        line_buffer.emplace_back();
-        line_buffer.back().reserve(loop.size()+1);
-        for(auto &p : loop) line_buffer.back().emplace_back(p[0]/10.0f,p[1]/10.0f);
-        auto first = *loop.begin();
-        line_buffer.back().emplace_back(first[0]/10.0f,first[1]/10.0f);
-    }
-}
-
-void execute_drawing(SDL_Renderer *renderer) {
+void draw_scene(scene &sc,SDL_Renderer *renderer) {
     /*const char padding = 10;
 
     SDL_Rect view;
@@ -118,7 +117,7 @@ void execute_drawing(SDL_Renderer *renderer) {
 
     SDL_SetRenderDrawColor(renderer,0,0,0,255);
 
-    for(auto &loop : line_buffer) {
+    for(auto &loop : sc.line_buffer) {
         SDL_RenderDrawLinesF(renderer,loop.data(),static_cast<int>(loop.size()));
     }
 
@@ -130,19 +129,15 @@ int odd_coord_count() {
     return 2;
 }
 
-class loop_reader {
-public:
-    virtual void add_coord(const poly_ops::point_t<coord_t>&) = 0;
-    virtual void next_loop() = 0;
-    virtual int next_shape() = 0;
-};
-
-int read_loops(const char *path,loop_reader &reader) {
+int read_loops(const char *path,std::vector<loops_t> &shapes) {
     std::ifstream is(path);
     if(!is.is_open()) {
         std::cerr << "failed to open " << path << ": " << std::strerror(errno) << std::endl;
         return 2;
     }
+
+    shapes.emplace_back();
+    shapes.back().emplace_back();
 
     poly_ops::point_t<coord_t> p;
     int c_count = 0;
@@ -151,43 +146,57 @@ int read_loops(const char *path,loop_reader &reader) {
         is >> std::ws;
         if(is.eof()) {
             if(c_count) return odd_coord_count();
-            if(shapes.back().loops.back().empty()) shapes.back().loops.pop_back();
-            if(shapes.back().loops.empty()) shapes.pop_back();
+            if(shapes.back().back().empty()) shapes.back().pop_back();
+            if(shapes.back().empty()) shapes.pop_back();
+
+            if(shapes.empty()) {
+                std::cerr << "no data in \"" << path << '"' << std::endl;
+                return 2;
+            }
             return 0;
         }
         auto c = is.peek();
         if(c == '=') {
             if(c_count) return odd_coord_count();
             is.get();
-            reader.next_loop();
+            if(!shapes.back().back().empty()) shapes.back().emplace_back();
         } else if(c == '#') {
             if(c_count) return odd_coord_count();
             is.get();
-            CHECK(reader.next_shape());
+            if(shapes.back().size() > 1 || !shapes.back().back().empty()) {
+                if(shapes.back().back().empty()) shapes.back().pop_back();
+                shapes.emplace_back();
+                shapes.back().emplace_back();
+            }
         } else {
             is >> p[c_count++];
             if(is.fail()) {
-                std::cerr << "invalid value in file" << std::endl;
+                std::cerr << "invalid value in \"" << path << '"' << std::endl;
                 return 2;
             }
             if(c_count > 1) {
                 c_count = 0;
-                reader.add_coord(p);
+                shapes.back().back().push_back(p);
             }
         }
     }
-    std::cerr << "error reading file: " << std::strerror(errno) << std::endl;
+    std::cerr << "error reading \"" << path << "\": " << std::strerror(errno) << std::endl;
     return 2;
 }
 
-class satellite_reader : public loop_reader {
+class rand_orbit_gen {
     std::mt19937 rgen;
     std::uniform_real_distribution<float> rudist;
     std::normal_distribution<float> rndist;
     std::uniform_real_distribution<float> ru2dist;
-    shapes_t &shapes;
 
-    orbit rand_orbit() {
+public:
+    rand_orbit_gen() :
+        rudist(-std::numbers::pi_v<float>,std::numbers::pi_v<float>),
+        rndist(0,0.8f),
+        ru2dist(1000,3000) {}
+
+    orbit operator()() {
         float theta = rudist(rgen);
         vec3 a = {std::cos(theta),std::sin(theta),0.0f};
         vec3 out = {0.0f,0.0f,1.0f};
@@ -198,79 +207,28 @@ class satellite_reader : public loop_reader {
         float radius = ru2dist(rgen);
         return {vmul(a,radius),vmul(b,radius)};
     }
-
-public:
-    satellite_reader(shapes_t &shapes) :
-        rudist(-std::numbers::pi_v<float>,std::numbers::pi_v<float>),
-        rndist(0,0.8f),
-        ru2dist(1000,3000),
-        shapes(shapes)
-    {
-        shapes.emplace_back(rand_orbit());
-        shapes.back().loops.emplace_back();
-    }
-
-    void add_coord(const poly_ops::point_t<coord_t> &p) override {
-        shapes.back().loops.back().push_back(p);
-    }
-    void next_loop() override {
-        if(!shapes.back().loops.back().empty()) shapes.back().loops.emplace_back();
-    }
-    int next_shape() override {
-        if(shapes.back().loops.size() > 1 || !shapes.back().loops.back().empty()) {
-            if(shapes.back().loops.back().empty()) shapes.back().loops.pop_back();
-            shapes.emplace_back(rand_orbit());
-            shapes.back().loops.emplace_back();
-        }
-        return 0;
-    }
 };
 
-int read_satellites_from_file(shapes_t &shapes) {
-    satellite_reader reader{shapes};
-    CHECK(read_loops("alphabet.txt",reader));
+int read_satellites_from_file(std::vector<satellite> &shapes) {
+    std::vector<loops_t> raw_shapes;
+    CHECK(read_loops("alphabet.txt",raw_shapes));
 
-    assert(!shapes.empty() && !shapes.back().loops.empty() && !shapes.back().loops.back().empty());
-    if(shapes.back().loops.back().empty()) shapes.back().loops.pop_back();
-    if(shapes.back().loops.empty()) shapes.pop_back();
-    if(shapes.empty()) {
-        std::cerr << "no data in \"alphabet.txt\"" << std::endl;
-        return 2;
-    }
+    rand_orbit_gen ogen;
+    shapes.reserve(raw_shapes.size());
+    for(auto &rs : raw_shapes) shapes.emplace_back(std::move(rs),ogen());
     return 0;
 }
 
-class shape_reader : public loop_reader {
-    loops_t &loops;
-
-public:
-    shape_reader(loops_t &loops) : loops(loops)
-    {
-        loops.emplace_back();
-    }
-
-    void add_coord(const poly_ops::point_t<coord_t> &p) override {
-        loops.back().push_back(p);
-    }
-    void next_loop() override {
-        if(!loops.back().empty()) loops.emplace_back();
-    }
-    int next_shape() override {
-        std::cerr << "multiple shapes not allowed for \"center.txt\"" << std::endl;
-        return 2;
-    }
-};
-
 int read_shape_from_file(loops_t &shape) {
-    shape_reader reader{shape};
-    CHECK(read_loops("center.txt",reader));
+    std::vector<loops_t> raw_shapes;
+    CHECK(read_loops("center.txt",raw_shapes));
 
-    assert(!shape.empty() && !shape.back().empty());
-    if(shape.back().empty()) shape.pop_back();
-    if(shape.empty()) {
-        std::cerr << "no data in \"center.txt\"" << std::endl;
+    if(raw_shapes.size() != 1) {
+        std::cerr << "multiple shapes are not allowed for \"center.txt\"" << std::endl;
         return 2;
     }
+
+    shape = std::move(raw_shapes[0]);
     return 0;
 }
 
@@ -281,10 +239,9 @@ template<typename Fn> struct scope_exit {
 };
 
 int main(int,char**) {
-    CHECK(read_satellites_from_file(shapes));
-    CHECK(read_shape_from_file(center_shape));
-
-    update_scene(0);
+    scene sc;
+    CHECK(read_satellites_from_file(sc.shapes));
+    CHECK(read_shape_from_file(sc.center_shape));
 
     SDL_SetHint(SDL_HINT_VIDEO_ALLOW_SCREENSAVER,"1");
 
@@ -299,42 +256,15 @@ int main(int,char**) {
     if(!renderer) return emit_failure("Failed to create renderer: ");
     scope_exit _renderer_exit{[=]{ SDL_DestroyRenderer(renderer); }};
 
-    //if(create_number_font(renderer)) return emit_failure("Failed to create texture: ");
-    //scope_exit _tex_exit{[]{ SDL_DestroyTexture(font_tex); }};
-
-    execute_drawing(renderer);
-
     SDL_Event event;
     Uint32 window_id = SDL_GetWindowID(window);
     auto start_time = std::chrono::steady_clock::now();
     for(;;) {
         while(SDL_PollEvent(&event)) {
             switch(event.type) {
-            /*case SDL_KEYDOWN:
-                switch(event.key.keysym.sym) {
-                case SDLK_SPACE:
-                    do_task(task::continue_);
-                    break;
-                case SDLK_s:
-                    do_task(task::dump_sweep);
-                    break;
-                case SDLK_o:
-                    do_task(task::dump_orig_points);
-                    break;
-                case SDLK_n:
-                    show_numbers = !show_numbers;
-                    execute_drawing(renderer);
-                    break;
-                default:
-                    break;
-                }
-                break;*/
             case SDL_WINDOWEVENT:
                 if(event.window.windowID == window_id) {
                     switch(event.window.event) {
-                    case SDL_WINDOWEVENT_SIZE_CHANGED:
-                        execute_drawing(renderer);
-                        break;
                     case SDL_WINDOWEVENT_CLOSE:
                         return 0;
                     default:
@@ -349,7 +279,7 @@ int main(int,char**) {
             }
         }
 
-        update_scene(std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start_time).count());
-        execute_drawing(renderer);
+        sc.update(std::chrono::duration_cast<std::chrono::duration<double>>(std::chrono::steady_clock::now() - start_time).count());
+        draw_scene(sc,renderer);
     }
 }
