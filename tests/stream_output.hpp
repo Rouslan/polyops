@@ -107,14 +107,17 @@ template<typename... T> struct pp_printer<std::tuple<T...>> {
     }
 };
 
-template<typename T> struct delimited {
-    const T &items;
+template<typename T> struct delimited_t {
+    T items;
     const char *delimiter;
 
-    explicit delimited(const T &items,const char *delimiter=",")
+    explicit delimited_t(T items,const char *delimiter=",")
         : items(items), delimiter(delimiter) {}
 };
-template<typename T> std::ostream &operator<<(std::ostream &os,delimited<T> d) {
+template<typename R> delimited_t<R> delimited(R &&items) {
+    return delimited_t<R>{std::forward<R>(items)};
+}
+template<typename T> std::ostream &operator<<(std::ostream &os,delimited_t<T> &&d) {
     bool started = false;
     for(auto &&item : d.items) {
         if(started) os << d.delimiter;

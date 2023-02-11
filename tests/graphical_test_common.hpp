@@ -57,7 +57,11 @@
 }
 
 #define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_SAMPLE if(graphical_debug) { \
-    report_hits(e.ab.b,samples[e.ab.a].hits,lb.result()); \
+    report_hits(i,samples.back().hits,lb.result()); \
+    auto out = mc__->console_line_stream(); \
+    out << "sweep: " << delimited(sweep); \
+    out << "\nbefore: " << delimited(events.touching_removed(lpoints)); \
+    out << "\nafter: " << delimited(events.touching_pending(lpoints)); \
 }
 
 #define POLY_OPS_DEBUG_STEP_BY_STEP_MISSED_INTR report_missed_intr(s1,s2)
@@ -123,6 +127,8 @@ template<typename Sweep,typename Events> void emit_forward_backward(
     const Events &events);
 template<typename T> struct _pp;
 template<typename T> _pp<T> pp(T &&x,unsigned int indent);
+template<typename T> struct delimited_t;
+template<typename R> delimited_t<R> delimited(R &&items);
 
 void report_hits(index_t index,const std::pmr::vector<index_t> &hits,int balance);
 void report_missed_intr(poly_ops::detail::segment<index_t> s1,poly_ops::detail::segment<index_t> s2);
