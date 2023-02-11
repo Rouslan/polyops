@@ -132,18 +132,13 @@ template<typename Index,typename Coord> struct loop_point {
     }
 };
 
-template<typename Index> struct segment {
+template<typename Index> struct segment_common {
     Index a;
     Index b;
 
-    segment() = default;
-    segment(Index a,Index b) : a{a}, b{b} {}
-    segment(const segment&) = default;
-
-    auto a_x(const auto &points) const { return points[a].data[0]; }
-    auto a_y(const auto &points) const { return points[a].data[1]; }
-    auto b_x(const auto &points) const { return points[b].data[0]; }
-    auto b_y(const auto &points) const { return points[b].data[1]; }
+    segment_common() = default;
+    segment_common(Index a,Index b) : a{a}, b{b} {}
+    segment_common(const segment_common&) = default;
 
     /* returns true if point 'a' comes before point 'b' in the loop */
     template<typename T> bool a_is_main(const T &points) const {
@@ -151,9 +146,35 @@ template<typename Index> struct segment {
         return points[a].next == b;
     }
 
-    friend bool operator==(segment a,segment b) {
+    friend bool operator==(segment_common a,segment_common b) {
         return a.a == b.a && a.b == b.b;
     }
+
+protected:
+    ~segment_common() = default;
+};
+
+template<typename Index> struct segment : segment_common<Index> {
+    using segment_common<Index>::segment_common;
+
+    segment(const segment_common<Index> &s) : segment_common<Index>(s) {}
+
+    auto a_x(const auto &points) const { return points[this->a].data[0]; }
+    auto a_y(const auto &points) const { return points[this->a].data[1]; }
+    auto b_x(const auto &points) const { return points[this->b].data[0]; }
+    auto b_y(const auto &points) const { return points[this->b].data[1]; }
+};
+
+template<typename Index,typename Coord> struct cached_segment : segment_common<Index> {
+    point_t<Coord> pa;
+    point_t<Coord> pb;
+
+    cached_segment() = default;
+    cached_segment(Index a,Index b,const point_t<Coord> &pa,const point_t<Coord> &pb)
+        : segment_common<Index>{a,b}, pa{pa}, pb{pb} {}
+    template<typename T> cached_segment(const segment_common<Index> &s,const T &points)
+        : segment_common<Index>{s}, pa{points[s.a].data}, pb{points[s.b].data} {}
+    cached_segment(const cached_segment&) = default;
 };
 
 /* The order of these determines their priority from greatest to least.
@@ -216,19 +237,24 @@ template<typename T> bool between(T x,T lo,T hi) {
 }
 
 template<typename Index,typename Coord>
-bool intersects_parallel(segment<Index> s1,segment<Index> s2,const loop_point<Index,Coord> *points,point_t<Coord> &p,std::span<at_edge_t,2> at_edge) {
+bool intersects_parallel(
+    const cached_segment<Index,Coord> &s1,
+    const cached_segment<Index,Coord> &s2,
+    point_t<Coord> &p,
+    std::span<at_edge_t,2> at_edge)
+{
     using long_t = long_coord_t<Coord>;
     using std::swap;
 
-    if(triangle_winding(points[s1.a].data,points[s1.b].data,points[s2.a].data) != 0) return false;
+    if(triangle_winding(s1.pa,s1.pb,s2.pa) != 0) return false;
 
     /* Reduce each line segment into a 1D value. Each d* value is the scalar
     projection of the corresponding s*.* point times the magnitude of s1. */
-    point_t<long_t> v1b = vcast<long_t>(points[s1.b].data-points[s1.a].data);
+    point_t<long_t> v1b = vcast<long_t>(s1.pb-s1.pa);
     long_t d1a = static_cast<long_t>(0);
     long_t d1b = square(v1b);
-    long_t d2a = vdot(points[s2.a].data-points[s1.a].data,v1b);
-    long_t d2b = vdot(points[s2.b].data-points[s1.a].data,v1b);
+    long_t d2a = vdot(s2.pa-s1.pa,v1b);
+    long_t d2b = vdot(s2.pb-s1.pa,v1b);
 
     POLY_OPS_ASSERT(0 != d1b && d2a != d2b);
 
@@ -236,54 +262,52 @@ bool intersects_parallel(segment<Index> s1,segment<Index> s2,const loop_point<In
     auto [lo2,hi2] = std::minmax(d2a,d2b);
 
     if(between(d1a,lo2,hi2)) {
-        p = points[s1.a].data;
+        p = s1.pa;
         at_edge[0] = at_edge_t::start;
         at_edge[1] = at_edge_t::no;
         return true;
     }
     if(between(d1b,lo2,hi2)) {
-        p = points[s1.b].data;
+        p = s1.pb;
         at_edge[0] = at_edge_t::end;
         at_edge[1] = at_edge_t::no;
         return true;
     }
     if(between(d2a,lo1,hi1)) {
-        p = points[s2.a].data;
+        p = s2.pa;
         at_edge[0] = at_edge_t::no;
         at_edge[1] = at_edge_t::start;
         return true;
     }
     if(between(d2b,lo1,hi1)) {
-        p = points[s2.b].data;
+        p = s2.pb;
         at_edge[0] = at_edge_t::no;
         at_edge[1] = at_edge_t::end;
         return true;
     }
 
     /* if both points intersect, we just return the first one */
-    POLY_OPS_ASSERT((s1.a_x(points) < s1.b_x(points) || s1.a_is_main(points)) &&
-        (s2.a_x(points) < s2.b_x(points) || s2.a_is_main(points)));
     if(lo1 == lo2 && hi1 == hi2) {
         if(d1a == d2a) {
             if(s1.a != s2.a) {
-                p = points[s1.a].data;
+                p = s1.pa;
                 at_edge[0] = at_edge_t::start;
                 at_edge[1] = at_edge_t::start;
                 return true;
             } else if(s1.b != s2.b) {
-                p = points[s1.b].data;
+                p = s1.pb;
                 at_edge[0] = at_edge_t::end;
                 at_edge[1] = at_edge_t::end;
                 return true;
             }
         } else {
             if(s1.a != s2.b) {
-                p = points[s1.a].data;
+                p = s1.pa;
                 at_edge[0] = at_edge_t::start;
                 at_edge[1] = at_edge_t::end;
                 return true;
             } else if(s1.b != s2.a) {
-                p = points[s1.b].data;
+                p = s1.pb;
                 at_edge[0] = at_edge_t::end;
                 at_edge[1] = at_edge_t::start;
                 return true;
@@ -308,26 +332,25 @@ lines, 'p' will be one of the end points that is inside the other line (if both
 ends are inside the other segment, one end is chosen arbitrarily). */
 template<typename Index,typename Coord>
 bool intersects(
-    segment<Index> s1,
-    segment<Index> s2,
-    const loop_point<Index,Coord> *points,
+    const cached_segment<Index,Coord> &s1,
+    const cached_segment<Index,Coord> &s2,
     point_t<Coord> &p,
     std::span<at_edge_t,2> at_edge,
     rand_generator &rgen)
 {
     using long_t = long_coord_t<Coord>;
 
-    Coord x1 = s1.a_x(points);
-    Coord y1 = s1.a_y(points);
-    Coord x2 = s1.b_x(points);
-    Coord y2 = s1.b_y(points);
-    Coord x3 = s2.a_x(points);
-    Coord y3 = s2.a_y(points);
-    Coord x4 = s2.b_x(points);
-    Coord y4 = s2.b_y(points);
+    const Coord x1 = s1.pa.x();
+    const Coord y1 = s1.pa.y();
+    const Coord x2 = s1.pb.x();
+    const Coord y2 = s1.pb.y();
+    const Coord x3 = s2.pa.x();
+    const Coord y3 = s2.pa.y();
+    const Coord x4 = s2.pb.x();
+    const Coord y4 = s2.pb.y();
 
     long_t d = static_cast<long_t>(x1-x2)*(y3-y4) - static_cast<long_t>(y1-y2)*(x3-x4);
-    if(d == 0) return intersects_parallel(s1,s2,points,p,at_edge);
+    if(d == 0) return intersects_parallel(s1,s2,p,at_edge);
 
     /* Connected lines do not count as intersecting. This check must be done
     after checking for parallel lines because coincident lines can have more
@@ -385,41 +408,6 @@ bool intersects(
 
         if(p[0] == x3 && p[1] == y3) at_edge[1] = at_edge_t::start;
         else if(p[0] == x4 && p[1] == y4) at_edge[1] = at_edge_t::end;
-
-        /*Coord xf = x1 + coord_ops<Coord>::floor(rx);
-        Coord xc = x1 + coord_ops<Coord>::ceil(rx);
-        Coord yf = y1 + coord_ops<Coord>::floor(ry);
-        Coord yc = y1 + coord_ops<Coord>::ceil(ry);
-
-        at_edge[0] = at_edge_t::no;
-        at_edge[1] = at_edge_t::no;
-
-        if((x1 == xc || x1 == xf) && (y1 == yc || y1 == yf)) {
-            p = {x1,y1};
-            at_edge[0] = at_edge_t::start;
-            if(p[0] == x3 && p[1] == y3) at_edge[1] = at_edge_t::start;
-            else if(p[0] == x4 && p[1] == y4) at_edge[1] = at_edge_t::end;
-        } else if((x2 == xc || x2 == xf) && (y2 == yc || y2 == yf)) {
-            p = {x2,y2};
-            at_edge[0] = at_edge_t::end;
-            if(p[0] == x3 && p[1] == y3) at_edge[1] = at_edge_t::start;
-            else if(p[0] == x4 && p[1] == y4) at_edge[1] = at_edge_t::end;
-        } else if((x3 == xc || x3 == xf) && (y3 == yc || y3 == yf)) {
-            p = {x3,y3};
-            at_edge[1] = at_edge_t::start;
-        } else if((x4 == xc || x4 == xf) && (y4 == yc || y4 == yf)) {
-            p = {x4,y4};
-            at_edge[1] = at_edge_t::end;
-        } else {
-            p[0] = x1 + coord_ops<Coord>::round(rx);
-            p[1] = y1 + coord_ops<Coord>::round(ry);
-        }
-        
-
-        POLY_OPS_ASSERT((p[0] == x1 && p[1] == y1) == (at_edge[0] == at_edge_t::start));
-        POLY_OPS_ASSERT((p[0] == x2 && p[1] == y2) == (at_edge[0] == at_edge_t::end));
-        POLY_OPS_ASSERT((p[0] == x3 && p[1] == y3) == (at_edge[1] == at_edge_t::start));
-        POLY_OPS_ASSERT((p[0] == x4 && p[1] == y4) == (at_edge[1] == at_edge_t::end));*/
     }
 
     return true;
@@ -753,7 +741,7 @@ public:
     event<Index> &operator[](std::size_t i) { return events[i]; }
     const event<Index> &operator[](std::size_t i) const { return events[i]; }
 
-    event<Index> &find(points_ref points,const segment<Index> s,event_type_t type,std::size_t upto) {
+    event<Index> &find(points_ref points,const segment_common<Index> &s,event_type_t type,std::size_t upto) {
         auto itr = std::lower_bound(
             events.begin(),
             events.begin()+upto,
@@ -763,7 +751,7 @@ public:
         return *itr;
     }
 
-    event<Index> &find(points_ref points,const segment<Index> s,event_type_t type) {
+    event<Index> &find(points_ref points,const segment_common<Index> &s,event_type_t type) {
         return find(points,s,type,last_size);
     }
 
@@ -893,34 +881,28 @@ This only produces a consistent order if all the lines start before any
 intersection point among those lines.
 */
 template<typename Index,typename Coord> struct sweep_cmp {
-    const std::pmr::vector<loop_point<Index,Coord>> &lpoints;
-
-    auto winding(Index p1,Index p2,Index p3) const {
-        return triangle_winding(lpoints[p1].data,lpoints[p2].data,lpoints[p3].data);
-    }
-
-    bool operator()(segment<Index> s1,segment<Index> s2) const {
-        if(s1.a_x(lpoints) == s2.a_x(lpoints)) {
-            Coord r = s1.a_y(lpoints) - s2.a_y(lpoints);
+    bool operator()(const cached_segment<Index,Coord> &s1,const cached_segment<Index,Coord> &s2) const {
+        if(s1.pa.x() == s2.pa.x()) {
+            Coord r = s1.pa.y() - s2.pa.y();
             if(r) return r > 0;
-            long_coord_t<Coord> r2 = winding(s1.a,s1.b,s2.b);
+            long_coord_t<Coord> r2 = triangle_winding(s1.pa,s1.pb,s2.pb);
             if(r2) return r2 > 0;
             /* the lines are coincident and have the same start point but they
             might be pointing away from each other */
-            r = s1.b_y(lpoints) - s2.b_y(lpoints);
+            r = s1.pb.y() - s2.pb.y();
             if(r) return r > 0;
-        } else if(s1.a_x(lpoints) < s2.a_x(lpoints)) {
-            if(s1.a_x(lpoints) != s1.b_x(lpoints)) {
-                long_coord_t<Coord> r = winding(s1.a,s1.b,s2.a);
+        } else if(s1.pa.x() < s2.pa.x()) {
+            if(s1.pa.x() != s1.pb.x()) {
+                long_coord_t<Coord> r = triangle_winding(s1.pa,s1.pb,s2.pa);
                 if(r) return r > 0;
-                r = winding(s1.a,s1.b,s2.b);
+                r = triangle_winding(s1.pa,s1.pb,s2.pb);
                 if(r) return r > 0;
             }
         } else {
-            if(s2.a_x(lpoints) != s2.b_x(lpoints)) {
-                long_coord_t<Coord> r = winding(s2.b,s2.a,s1.a);
+            if(s2.pa.x() != s2.pb.x()) {
+                long_coord_t<Coord> r = triangle_winding(s2.pb,s2.pa,s1.pa);
                 if(r) return r > 0;
-                r = winding(s2.b,s2.a,s1.b);
+                r = triangle_winding(s2.pb,s2.pa,s1.pb);
                 if(r) return r > 0;
             }
         }
@@ -930,13 +912,13 @@ template<typename Index,typename Coord> struct sweep_cmp {
 };
 
 template<typename Index> struct line_bal_sweep_cmp {
-    bool operator()(segment<Index> s1,segment<Index> s2) const {
+    bool operator()(const segment_common<Index> &s1,const segment_common<Index> &s2) const {
         return s1.b == s2.b ? (s1.a > s2.a) : (s1.b > s2.b);
     }
 };
 
 template<typename Index,typename Coord>
-using sweep_t = std::pmr::set<segment<Index>,sweep_cmp<Index,Coord>>;
+using sweep_t = std::pmr::set<cached_segment<Index,Coord>,sweep_cmp<Index,Coord>>;
 
 template<typename Index,typename Coord>
 bool check_integrity(
@@ -954,7 +936,7 @@ Index split_segment(
     events_t<Index,Coord> &events,
     sweep_t<Index,Coord> &sweep,
     std::pmr::vector<loop_point<Index,Coord>> &points,
-    segment<Index> s,
+    const cached_segment<Index,Coord> &s,
     const point_t<Coord> &c,
     at_edge_t at_edge)
 {
@@ -1000,14 +982,14 @@ bool check_intersection(
     events_t<Index,Coord> &events,
     sweep_t<Index,Coord> &sweep,
     std::pmr::vector<loop_point<Index,Coord>> &points,
-    segment<Index> s1,
-    segment<Index> s2,
+    const cached_segment<Index,Coord> &s1,
+    const cached_segment<Index,Coord> &s2,
     rand_generator &rgen,
     point_tracker<Index> *pt)
 {
     point_t<Coord> intr;
     at_edge_t at_edge[2];
-    if(intersects(s1,s2,points.data(),intr,at_edge,rgen)) {
+    if(intersects(s1,s2,intr,at_edge,rgen)) {
         Index intr1,intr2;
 
         if(at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no) [[likely]] {
@@ -1628,7 +1610,7 @@ void normalizer<Index,Coord>::self_intersection() {
         events.add_fb_events(lpoints,j1,j2);
     }
 
-    detail::sweep_t<Index,Coord> sweep(sweep_cmp<Index,Coord>{lpoints},&discrete_mem);
+    detail::sweep_t<Index,Coord> sweep(sweep_cmp<Index,Coord>{},&discrete_mem);
 
     /* A sweep is done over the points. We travel from point to point from left
     to right, of each line segment. If the point is on the left side of the
@@ -1656,22 +1638,22 @@ void normalizer<Index,Coord>::self_intersection() {
         case event_type_t::forward:
         case event_type_t::vforward:
             if(forward) {
-                auto itr = std::get<0>(sweep.insert(e.ab));
+                auto itr = std::get<0>(sweep.insert({e.ab,lpoints}));
 
                 POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F
 
-                if(itr != sweep.begin() && check_intersection(events,sweep,lpoints,e.ab,*std::prev(itr),rgen,pt)) continue;
+                if(itr != sweep.begin() && check_intersection(events,sweep,lpoints,{e.ab,lpoints},*std::prev(itr),rgen,pt)) continue;
                 ++itr;
-                if(itr != sweep.end()) check_intersection(events,sweep,lpoints,e.ab,*itr,rgen,pt);
+                if(itr != sweep.end()) check_intersection(events,sweep,lpoints,{e.ab,lpoints},*itr,rgen,pt);
             } else {
-                sweep.erase(e.ab);
+                sweep.erase({e.ab,lpoints});
                 POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_FR
             }
             break;
         case event_type_t::backward:
         case event_type_t::vbackward:
             if(forward) {
-                auto itr = sweep.find(e.line_ba());
+                auto itr = sweep.find({e.line_ba(),lpoints});
 
                 // if it's not in here, the line was split and no longer exists
                 if(itr != sweep.end()) {
@@ -1688,7 +1670,7 @@ void normalizer<Index,Coord>::self_intersection() {
                     events.current().status = event_status_t::deleted;
                 }
             } else {
-                sweep.insert(e.line_ba());
+                sweep.insert({e.line_ba(),lpoints});
                 POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_BR
             }
             break;
