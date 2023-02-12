@@ -1,14 +1,16 @@
 [build-system]
-requires = ["setuptools >= 61","Cython >= 0.29","packaging"]
+requires = ["setuptools >= 61","Cython >= 0.29","packaging","setuptools-git-versioning<2"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools-git-versioning]
+enabled = true
+
 [project]
-name = "poly_ops"
-version = "0.1"
+name = "polyops"
 description = "Operations on polygons"
-readme = "py/README.rst"
+readme = "py/README.md"
 authors = [{name="Rouslan Korneychuk",email="rouslank@msn.com"}]
-keywords = ["polygon","inset","outset","geometry"]
+keywords = ["polygon","inset","outset","geometry","boolean","union"]
 license = {file="LICENSE.txt"}
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
@@ -17,3 +19,4 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Scientific/Engineering :: Mathematics"]
 dependencies = ['numpy']
+dynamic = ["version"]

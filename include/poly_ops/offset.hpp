@@ -150,7 +150,12 @@ void add_offset_point(
 } // namespace detail
 
 template<typename Index,typename Coord,point_range<Coord> R>
-void add_offset_loop(normalizer<Index,Coord> &n,R &&input,real_coord_t<Coord> magnitude,Coord arc_step_size) {
+void add_offset_loop(
+    normalizer<Index,Coord> &n,
+    R &&input,
+    real_coord_t<Coord> magnitude,
+    std::type_identity_t<Coord> arc_step_size)
+{
     auto sink = n.add_loop();
     Index orig_i = sink.last_orig_i();
     auto itr = std::ranges::begin(input);

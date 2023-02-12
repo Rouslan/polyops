@@ -183,7 +183,7 @@ namespace poly_ops {
     }
 
     namespace detail {
-        template<typename Index> auto to_json_value(const segment<Index> &x) {
+        template<typename Index> auto to_json_value(const segment_common<Index> &x) {
             return json::array_tuple(x.a,x.b);
         }
 
@@ -308,7 +308,8 @@ template<typename Sweep> void delegate_drawing(
     draw_lines.resize(lpoints.size());
     for(size_t i=0; i<lpoints.size(); ++i) {
         draw_point::state state = draw_point::NORMAL;
-        if(sweep.count(detail::segment<index_t>(i,lpoints[i].next)) || sweep.count(detail::segment<index_t>(lpoints[i].next,i))) {
+        if(sweep.count(detail::cached_segment<index_t,coord_t>(index_t(i),lpoints[i].next,lpoints))
+                || sweep.count(detail::cached_segment<index_t,coord_t>(lpoints[i].next,index_t(i),lpoints))) {
             state = draw_point::SWEEP;
         } else if(lpoints[i].line_bal != detail::UNDEF_LINE_BAL) {
             if(lpoints[i].line_bal < 0) state = draw_point::INVERTED;

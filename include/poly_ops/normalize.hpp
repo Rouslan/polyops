@@ -146,7 +146,7 @@ template<typename Index> struct segment_common {
         return points[a].next == b;
     }
 
-    friend bool operator==(segment_common a,segment_common b) {
+    friend bool operator==(const segment_common &a,const segment_common &b) {
         return a.a == b.a && a.b == b.b;
     }
 
@@ -174,6 +174,8 @@ template<typename Index,typename Coord> struct cached_segment : segment_common<I
         : segment_common<Index>{a,b}, pa{pa}, pb{pb} {}
     template<typename T> cached_segment(const segment_common<Index> &s,const T &points)
         : segment_common<Index>{s}, pa{points[s.a].data}, pb{points[s.b].data} {}
+    template<typename T> cached_segment(Index a,Index b,const T &points)
+        : segment_common<Index>{a,b}, pa{points[a].data}, pb{points[b].data} {}
     cached_segment(const cached_segment&) = default;
 };
 
@@ -1047,12 +1049,12 @@ using intr_array_t = std::pmr::vector<intr_t<Index>>;
 
 /* This is only used for debugging */
 template<typename Index,typename Coord>
-bool intersects_any(segment<Index> s1,const sweep_t<Index,Coord> &sweep,const loop_point<Index,Coord> *points) {
+bool intersects_any(const cached_segment<Index,Coord> &s1,const sweep_t<Index,Coord> &sweep) {
     rand_generator rgen;
     for(auto s2 : sweep) {
         point_t<Coord> intr;
         at_edge_t at_edge[2];
-        if(intersects(s1,s2,points,intr,at_edge,rgen) && (at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no)) {
+        if(intersects(s1,s2,intr,at_edge,rgen) && (at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no)) {
             POLY_OPS_DEBUG_STEP_BY_STEP_MISSED_INTR;
             return true;
         }
@@ -1665,7 +1667,7 @@ void normalizer<Index,Coord>::self_intersection() {
                         check_intersection(events,sweep,lpoints,*std::prev(itr),*itr,rgen,pt);
                     }
 
-                    POLY_OPS_ASSERT_SLOW(!intersects_any(e.line_ba(),sweep,lpoints.data()));
+                    POLY_OPS_ASSERT_SLOW(!intersects_any({e.line_ba(),lpoints},sweep));
                 } else {
                     events.current().status = event_status_t::deleted;
                 }

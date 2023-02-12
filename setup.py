@@ -40,7 +40,8 @@ setup(
         language='c++',
         depends=[
             'include/poly_ops/poly_ops.hpp',
-            'include/poly_ops/base.hpp'
+            'include/poly_ops/base.hpp',
+            'include/poly_ops/normalize.hpp',
             'include/poly_ops/offset.hpp',
             'include/poly_ops/strided_itr.hpp',
             'include/poly_ops/mini_flat_set.hpp'])],
