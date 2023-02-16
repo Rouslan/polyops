@@ -17,8 +17,10 @@
 #include <span>
 #include <type_traits>
 #include <random>
+#include <boost/intrusive/set.hpp>
 
 #include "base.hpp"
+#include "sweep_set.hpp"
 
 
 #ifndef POLY_OPS_GRAPHICAL_DEBUG
@@ -205,12 +207,13 @@ enum class event_status_t {normal,processed,deleted};
 
 template<typename Index> struct event {
     segment<Index> ab;
+    Index sweep_node;
     event_type_t type;
     event_status_t status;
 
     event() = default;
-    event(segment<Index> ab,event_type_t type)
-        : ab{ab}, type{type}, status{event_status_t::normal} {}
+    event(segment<Index> ab,Index sweep_node,event_type_t type)
+        : ab{ab}, sweep_node{sweep_node}, type{type}, status{event_status_t::normal} {}
     event(const event &b) = default;
 
     event &operator=(const event&) = default;
@@ -747,7 +750,7 @@ public:
         auto itr = std::lower_bound(
             events.begin(),
             events.begin()+upto,
-            event<Index>{s,type},
+            event<Index>{s,0,type},
             cmp{points});
         POLY_OPS_ASSERT(itr != (events.begin()+upto) && itr->ab == s && itr->type == type);
         return *itr;
@@ -815,11 +818,11 @@ public:
         return {events[++current_i],true};
     }
 
-    void add_event(Index sa,Index sb,event_type_t t) {
-        events.emplace_back(segment<Index>{sa,sb},t);
+    void add_event(Index sa,Index sb,Index sweep_node,event_type_t t) {
+        events.emplace_back(segment<Index>{sa,sb},sweep_node,t);
     }
 
-    void add_fb_events(points_ref points,Index sa,Index sb) {
+    void add_fb_events(points_ref points,Index sa,Index sb,Index sweep_node) {
         auto f = event_type_t::forward;
         auto b = event_type_t::backward;
         if(points[sa].data[0] == points[sb].data[0]) {
@@ -829,8 +832,8 @@ public:
             f = event_type_t::vforward;
             b = event_type_t::vbackward;
         }
-        add_event(sa,sb,f);
-        add_event(sb,sa,b);
+        add_event(sa,sb,sweep_node,f);
+        add_event(sb,sa,sweep_node,b);
     }
 
     void reserve(std::size_t amount) {
@@ -870,6 +873,9 @@ public:
     auto end() const { return events.end(); }
     std::size_t size() const { return events.size(); }
 };
+
+template<typename Index,typename Coord>
+using sweep_node = set_node<cached_segment<Index,Coord>,Index>;
 
 /* Line segments are ordered by whether they are "above" other segments or not.
 Given two line segments, we take the segment whose start X coordinate is the
@@ -920,7 +926,10 @@ template<typename Index> struct line_bal_sweep_cmp {
 };
 
 template<typename Index,typename Coord>
-using sweep_t = std::pmr::set<cached_segment<Index,Coord>,sweep_cmp<Index,Coord>>;
+using sweep_t = sweep_set<cached_segment<Index,Coord>,Index,sweep_cmp<Index,Coord>>;
+
+template<typename Index,typename Coord>
+using line_bal_sweep_t = sweep_set<cached_segment<Index,Coord>,Index,line_bal_sweep_cmp<Index>>;
 
 template<typename Index,typename Coord>
 bool check_integrity(
@@ -928,92 +937,9 @@ bool check_integrity(
     const sweep_t<Index,Coord> &sweep)
 {
     for(auto &s : sweep) {
-        if(!(points[s.a].next == s.b || points[s.b].next == s.a)) return false;
+        if(!(points[s.value.a].next == s.value.b || points[s.value.b].next == s.value.a)) return false;
     }
     return true;
-}
-
-template<typename Index,typename Coord>
-Index split_segment(
-    events_t<Index,Coord> &events,
-    sweep_t<Index,Coord> &sweep,
-    std::pmr::vector<loop_point<Index,Coord>> &points,
-    const cached_segment<Index,Coord> &s,
-    const point_t<Coord> &c,
-    at_edge_t at_edge)
-{
-    Index sa = s.a;
-    Index sb = s.b;
-
-    if(at_edge != at_edge_t::no) {
-        return at_edge == at_edge_t::start ? sa : sb;
-    }
-    sweep.erase(s);
-    events.find(
-        points,
-        s,
-        points[sa].data[0] == points[sb].data[0] ? event_type_t::vforward : event_type_t::forward).status = event_status_t::deleted;
-
-    POLY_OPS_ASSERT(points[sa].data != c && points[sb].data != c);
-
-    if(!s.a_is_main(points)) std::swap(sa,sb);
-
-    Index mid = points.size();
-    points[sa].next = mid;
-    points.emplace_back(c,sb,UNDEF_LINE_BAL);
-    POLY_OPS_ASSERT_SLOW(check_integrity(points,sweep));
-
-    /* even if the original line was not vertical, one of the new lines might
-    be vertical after rounding */
-    if(points[sa].data[0] <= points[mid].data[0]) {
-        events.add_fb_events(points,sa,mid);
-    } else {
-        events.add_fb_events(points,mid,sa);
-    }
-    if(points[mid].data[0] <= points[sb].data[0]) {
-        events.add_fb_events(points,mid,sb);
-    } else {
-        events.add_fb_events(points,sb,mid);
-    }
-
-    return mid;
-}
-
-template<typename Index,typename Coord>
-bool check_intersection(
-    events_t<Index,Coord> &events,
-    sweep_t<Index,Coord> &sweep,
-    std::pmr::vector<loop_point<Index,Coord>> &points,
-    const cached_segment<Index,Coord> &s1,
-    const cached_segment<Index,Coord> &s2,
-    rand_generator &rgen,
-    point_tracker<Index> *pt)
-{
-    point_t<Coord> intr;
-    at_edge_t at_edge[2];
-    if(intersects(s1,s2,intr,at_edge,rgen)) {
-        Index intr1,intr2;
-
-        if(at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no) [[likely]] {
-            intr1 = split_segment(events,sweep,points,s1,intr,at_edge[0]);
-            intr2 = split_segment(events,sweep,points,s2,intr,at_edge[1]);
-
-            if(pt) pt->new_intersection(intr1,intr2);
-
-            points[intr1].line_bal = CHECK_LINE_BAL;
-            points[intr2].line_bal = CHECK_LINE_BAL;
-
-            return true;
-        } else {
-            intr1 = at_edge[0] == at_edge_t::start ? s1.a : s1.b;
-            intr2 = at_edge[1] == at_edge_t::start ? s2.a : s2.b;
-
-            points[intr1].line_bal = CHECK_LINE_BAL;
-            points[intr2].line_bal = CHECK_LINE_BAL;
-        }
-    }
-
-    return false;
 }
 
 template<typename T> concept sized_or_forward_range
@@ -1049,12 +975,12 @@ using intr_array_t = std::pmr::vector<intr_t<Index>>;
 
 /* This is only used for debugging */
 template<typename Index,typename Coord>
-bool intersects_any(const cached_segment<Index,Coord> &s1,const sweep_t<Index,Coord> &sweep) {
+bool intersects_any(const sweep_node<Index,Coord> &s1,const sweep_t<Index,Coord> &sweep) {
     rand_generator rgen;
     for(auto s2 : sweep) {
         point_t<Coord> intr;
         at_edge_t at_edge[2];
-        if(intersects(s1,s2,intr,at_edge,rgen) && (at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no)) {
+        if(intersects(s1.value,s2.value,intr,at_edge,rgen) && (at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no)) {
             POLY_OPS_DEBUG_STEP_BY_STEP_MISSED_INTR;
             return true;
         }
@@ -1065,7 +991,7 @@ bool intersects_any(const cached_segment<Index,Coord> &s1,const sweep_t<Index,Co
 /* This is only used for debugging */
 template<typename Index,typename Coord>
 bool consistent_order(const sweep_t<Index,Coord> &sweep) {
-    auto cmp = sweep.key_comp();
+    auto &cmp = sweep.node_comp();
     for(auto itr_a = sweep.begin(); itr_a != sweep.end(); ++itr_a) {
         auto itr_b = sweep.begin();
         for(; itr_b != itr_a; ++itr_b) {
@@ -1408,6 +1334,11 @@ template<std::integral Index,coordinate Coord> class normalizer {
     std::pmr::vector<detail::loop_point<Index,Coord>> lpoints;
     detail::intr_array_t<Index> samples;
     detail::events_t<Index,Coord> events;
+
+    /* The first value in this array is reserved for the red black tree in
+    "sweep_set" */
+    std::pmr::vector<detail::sweep_node<Index,Coord>> sweep_nodes;
+
     detail::broken_starts_t<Index,Coord> broken_starts;
     std::pmr::vector<Index> broken_ends;
     detail::rand_generator rgen;
@@ -1419,6 +1350,16 @@ template<std::integral Index,coordinate Coord> class normalizer {
     void self_intersection();
     void normalize();
     void calc_line_bal();
+    Index split_segment(
+        detail::sweep_t<Index,Coord> &sweep,
+        Index s,
+        const point_t<Coord> &c,
+        detail::at_edge_t at_edge);
+    bool check_intersection(
+        detail::sweep_t<Index,Coord> &sweep,
+        Index s1,
+        Index s2);
+    void add_fb_events(Index sa,Index sb);
 
 public:
     point_tracker<Index> *pt;
@@ -1457,7 +1398,10 @@ public:
         original_i(0),
         ran(false),
         loops_out(contig_mem),
-        pt(pt) {}
+        pt(pt)
+    {
+        sweep_nodes.emplace_back();
+    }
     
     /* Important: you cannot pass the return value of "get_output()" from the
     same instance of "normalizer" to this function. If you want to feed the
@@ -1496,8 +1440,7 @@ public:
     /* The output of this function has references to data in this instance of
     "normalizer". The returned range is invalidated when "reset()",
     "add_loop()", or "add_loops()" is called or if the instance is destroyed. To
-    keep the data, make a copy. The data is also not sequential. "normalize()"
-    must be called before calling this function. */
+    keep the data, make a copy. The data is also not sequential. */
     template<bool TreeOut>
     std::conditional_t<TreeOut,
         borrowed_temp_polygon_tree_range<Index,Coord>,
@@ -1570,10 +1513,10 @@ void normalizer<Index,Coord>::point_sink::operator()(const point_t<Coord> &p,Ind
         prev = p;
         first_i = static_cast<Index>(n.lpoints.size());
 
-        /* Normally points aren't added until another point is added or the
-        destructor is called, but duplicate points aren't added anyway and
-        adding it now means the "prev != n.lpoints.back().data" checks above and
-        in the desctructor are always safe. */
+        /* Normally points aren't added until this is called with the next point
+        or the destructor is called, but duplicate points aren't added anyway
+        and adding it now means the "prev != n.lpoints.back().data" checks above
+        and in the desctructor are always safe. */
         n.lpoints.emplace_back(prev,static_cast<Index>(n.lpoints.size())+1);
         if(n.pt) n.pt->point_added(n.original_i);
 
@@ -1593,6 +1536,94 @@ normalizer<Index,Coord>::point_sink::~point_sink() {
     }
 }
 
+template<std::integral Index,coordinate Coord>
+void normalizer<Index,Coord>::add_fb_events(Index sa,Index sb) {
+    events.add_fb_events(lpoints,sa,sb,static_cast<Index>(sweep_nodes.size()));
+    sweep_nodes.emplace_back(detail::cached_segment<Index,Coord>(sa,sb,lpoints));
+}
+
+template<std::integral Index,coordinate Coord>
+Index normalizer<Index,Coord>::split_segment(
+    detail::sweep_t<Index,Coord> &sweep,
+    Index s,
+    const point_t<Coord> &c,
+    detail::at_edge_t at_edge)
+{
+    using namespace detail;
+
+    Index sa = sweep_nodes[s].value.a;
+    Index sb = sweep_nodes[s].value.b;
+
+    if(at_edge != at_edge_t::no) {
+        return at_edge == at_edge_t::start ? sa : sb;
+    }
+    sweep.erase(s);
+    sweep.init_node(s);
+    events.find(
+        lpoints,
+        sweep_nodes[s].value,
+        lpoints[sa].data[0] == lpoints[sb].data[0] ? event_type_t::vforward : event_type_t::forward).status = event_status_t::deleted;
+
+    POLY_OPS_ASSERT(lpoints[sa].data != c && lpoints[sb].data != c);
+
+    if(!segment<Index>(sa,sb).a_is_main(lpoints)) std::swap(sa,sb);
+
+    Index mid = lpoints.size();
+    lpoints[sa].next = mid;
+    lpoints.emplace_back(c,sb,UNDEF_LINE_BAL);
+    POLY_OPS_ASSERT_SLOW(check_integrity(lpoints,sweep));
+
+    /* even if the original line was not vertical, one of the new lines might
+    be vertical after rounding */
+    if(lpoints[sa].data[0] <= lpoints[mid].data[0]) {
+        add_fb_events(sa,mid);
+    } else {
+        add_fb_events(mid,sa);
+    }
+    if(lpoints[mid].data[0] <= lpoints[sb].data[0]) {
+        add_fb_events(mid,sb);
+    } else {
+        add_fb_events(sb,mid);
+    }
+
+    return mid;
+}
+
+template<std::integral Index,coordinate Coord>
+bool normalizer<Index,Coord>::check_intersection(
+    detail::sweep_t<Index,Coord> &sweep,
+    Index s1,
+    Index s2)
+{
+    using namespace detail;
+
+    point_t<Coord> intr;
+    at_edge_t at_edge[2];
+    if(intersects(sweep_nodes[s1].value,sweep_nodes[s2].value,intr,at_edge,rgen)) {
+        Index intr1,intr2;
+
+        if(at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no) [[likely]] {
+            intr1 = split_segment(sweep,s1,intr,at_edge[0]);
+            intr2 = split_segment(sweep,s2,intr,at_edge[1]);
+
+            if(pt) pt->new_intersection(intr1,intr2);
+
+            lpoints[intr1].line_bal = CHECK_LINE_BAL;
+            lpoints[intr2].line_bal = CHECK_LINE_BAL;
+
+            return true;
+        } else {
+            intr1 = at_edge[0] == at_edge_t::start ? sweep_nodes[s1].value.a : sweep_nodes[s1].value.b;
+            intr2 = at_edge[1] == at_edge_t::start ? sweep_nodes[s2].value.a : sweep_nodes[s2].value.b;
+
+            lpoints[intr1].line_bal = CHECK_LINE_BAL;
+            lpoints[intr2].line_bal = CHECK_LINE_BAL;
+        }
+    }
+
+    return false;
+}
+
 /* This is a modified version of the Bentley–Ottmann algorithm. Lines are broken
    at intersections. Two end-points touching does not count as an intersection.
    */
@@ -1609,10 +1640,10 @@ void normalizer<Index,Coord>::self_intersection() {
         /* in the case of vertical line segments, the points must retain their
         original order due to an assumption made by vert_overlap() */
         if(lpoints[j1].data[0] > lpoints[j2].data[0]) std::swap(j1,j2);
-        events.add_fb_events(lpoints,j1,j2);
+        add_fb_events(j1,j2);
     }
 
-    detail::sweep_t<Index,Coord> sweep(sweep_cmp<Index,Coord>{},&discrete_mem);
+    sweep_t<Index,Coord> sweep(sweep_nodes);
 
     /* A sweep is done over the points. We travel from point to point from left
     to right, of each line segment. If the point is on the left side of the
@@ -1631,8 +1662,8 @@ void normalizer<Index,Coord>::self_intersection() {
 
         if(e.status == event_status_t::deleted) continue;
 
-        POLY_OPS_ASSERT_SLOW(std::ranges::all_of(sweep,[&,e=e](segment<Index> s) {
-            return e.ab.a_x(lpoints) <= s.a_x(lpoints) || e.ab.a_x(lpoints) <= s.b_x(lpoints);
+        POLY_OPS_ASSERT_SLOW(std::ranges::all_of(sweep,[&,e=e](auto s) {
+            return e.ab.a_x(lpoints) <= s.value.pa.x() || e.ab.a_x(lpoints) <= s.value.pb.x();
         }));
         POLY_OPS_ASSERT_SLOW(consistent_order(sweep));
 
@@ -1640,39 +1671,38 @@ void normalizer<Index,Coord>::self_intersection() {
         case event_type_t::forward:
         case event_type_t::vforward:
             if(forward) {
-                auto itr = std::get<0>(sweep.insert({e.ab,lpoints}));
+                auto [itr,inserted] = sweep.insert(e.sweep_node);
+                POLY_OPS_ASSERT(inserted);
 
                 POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F
 
-                if(itr != sweep.begin() && check_intersection(events,sweep,lpoints,{e.ab,lpoints},*std::prev(itr),rgen,pt)) continue;
+                if(itr != sweep.begin() && check_intersection(sweep,e.sweep_node,std::prev(itr).index())) continue;
                 ++itr;
-                if(itr != sweep.end()) check_intersection(events,sweep,lpoints,{e.ab,lpoints},*itr,rgen,pt);
+                if(itr != sweep.end()) check_intersection(sweep,e.sweep_node,itr.index());
             } else {
-                sweep.erase({e.ab,lpoints});
+                sweep.erase(e.sweep_node);
                 POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_FR
             }
             break;
         case event_type_t::backward:
         case event_type_t::vbackward:
             if(forward) {
-                auto itr = sweep.find({e.line_ba(),lpoints});
-
                 // if it's not in here, the line was split and no longer exists
-                if(itr != sweep.end()) {
-                    itr = sweep.erase(itr);
+                if(!sweep.unique(e.sweep_node)) {
+                    auto itr = sweep.erase(e.sweep_node);
 
                     POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_B
 
                     if(itr != sweep.end() && itr != sweep.begin()) {
-                        check_intersection(events,sweep,lpoints,*std::prev(itr),*itr,rgen,pt);
+                        check_intersection(sweep,std::prev(itr).index(),itr.index());
                     }
 
-                    POLY_OPS_ASSERT_SLOW(!intersects_any({e.line_ba(),lpoints},sweep));
+                    POLY_OPS_ASSERT_SLOW(!intersects_any(sweep_nodes[e.sweep_node],sweep));
                 } else {
                     events.current().status = event_status_t::deleted;
                 }
             } else {
-                sweep.insert({e.line_ba(),lpoints});
+                sweep.insert(sweep_nodes[e.sweep_node]);
                 POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_BR
             }
             break;
@@ -1684,13 +1714,13 @@ template<std::integral Index,coordinate Coord>
 void normalizer<Index,Coord>::calc_line_bal() {
     using namespace detail;
 
-    std::pmr::set<segment<Index>,line_bal_sweep_cmp<Index>> sweep(&discrete_mem);
+    line_bal_sweep_t<Index,Coord> sweep(sweep_nodes);
 
     auto scan = [&,this](Index i) {
         if(lpoints[i].line_bal == CHECK_LINE_BAL) {
             samples.emplace_back(i,std::pmr::vector<Index>(contig_mem));
             line_balance<Index,Coord> lb{lpoints.data(),i,samples.back().hits};
-            for(const segment<Index> &s : sweep) lb.check(s);
+            for(const sweep_node<Index,Coord> &s : sweep) lb.check(s.value);
             for(segment<Index> s : events.touching_removed(lpoints)) lb.check(s);
             for(segment<Index> s : events.touching_pending(lpoints)) lb.check(s);
             lpoints[i].line_bal = lb.result();
@@ -1712,17 +1742,13 @@ void normalizer<Index,Coord>::calc_line_bal() {
         switch(e.type) {
         case event_type_t::forward:
         case event_type_t::vforward:
-            sweep.insert(e.ab);
+            sweep.insert(e.sweep_node);
             scan(e.ab.a);
             break;
         case event_type_t::backward:
         case event_type_t::vbackward:
-            {
-                auto itr = sweep.find(e.line_ba());
-                POLY_OPS_ASSERT(itr != sweep.end());
-                scan(e.ab.a);
-                sweep.erase(itr);
-            }
+            scan(e.ab.a);
+            sweep.erase(e.sweep_node);
             break;
         }
     }
@@ -1825,6 +1851,7 @@ template<std::integral Index,coordinate Coord>
 void normalizer<Index,Coord>::reset() {
     lpoints.clear();
     samples.clear();
+    sweep_nodes.resize(1);
     ran = false;
 }
 

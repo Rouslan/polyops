@@ -59,12 +59,12 @@
 #define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_SAMPLE if(graphical_debug) { \
     report_hits(i,samples.back().hits,lb.result()); \
     auto out = mc__->console_line_stream(); \
-    out << "sweep: " << delimited(sweep); \
+    out << "sweep: " << delimited(sweep | std::views::transform([](auto &n){ return n.value; })); \
     out << "\nbefore: " << delimited(events.touching_removed(lpoints)); \
     out << "\nafter: " << delimited(events.touching_pending(lpoints)); \
 }
 
-#define POLY_OPS_DEBUG_STEP_BY_STEP_MISSED_INTR report_missed_intr(s1,s2)
+#define POLY_OPS_DEBUG_STEP_BY_STEP_MISSED_INTR report_missed_intr(s1.value,s2.value)
 
 #define POLY_OPS_DEBUG_ITERATION if(timeout) { \
     if(std::chrono::steady_clock::now() > timeout_expiry) { \
@@ -212,9 +212,9 @@ template<typename Sweep,typename Events> void emit_forward_backward(
         attr("command") = "event",
         attr("type") = forward ? "forward" : "backward",
         attr("segment") = seg,
-        attr("before") = before != sweep.end() ? just(*before) : std::nullopt,
-        attr("after") = after != sweep.end() ? just(*after) : std::nullopt,
-        attr("sweep") = array_range(sweep),
+        attr("before") = before != sweep.end() ? just(before->value) : std::nullopt,
+        attr("after") = after != sweep.end() ? just(after->value) : std::nullopt,
+        attr("sweep") = array_range(sweep | std::views::transform([](auto &node) { return node.value; })),
         attr("events") = array_range(events)));
 }
 

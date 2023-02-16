@@ -6,12 +6,8 @@
 #include <type_traits>
 #include <iterator>
 #include <vector>
-
-
-#ifndef POLY_OPS_ASSERT
 #include <cassert>
-#define POLY_OPS_ASSERT assert
-#endif
+
 
 namespace poly_ops::detail {
 
@@ -50,7 +46,7 @@ class mini_flat_set {
 
     template<std::input_iterator InputIt>
     T *create_items(Allocator &alloc,InputIt first,InputIt last) {
-        POLY_OPS_ASSERT(_size == 1);
+        assert(_size == 1);
 
         T tmp = u.item;
         u.data = alloc_data(alloc,2);
@@ -63,7 +59,7 @@ class mini_flat_set {
 
     template<std::forward_iterator InputIt>
     T *create_items(Allocator &alloc,InputIt first,InputIt last) {
-        POLY_OPS_ASSERT(_size == 1);
+        assert(_size == 1);
 
         auto isize = std::distance(first,last);
 
@@ -75,7 +71,7 @@ class mini_flat_set {
 
     template<std::input_iterator InputIt>
     T *append_items(Allocator &alloc,InputIt first,InputIt last) {
-        POLY_OPS_ASSERT(_size > 1);
+        assert(_size > 1);
 
         size_t total = _size;
         for(; first != last; ++first) {
@@ -92,7 +88,7 @@ class mini_flat_set {
 
     template<std::forward_iterator InputIt>
     T *append_items(Allocator &alloc,InputIt first,InputIt last) {
-        POLY_OPS_ASSERT(_size > 1);
+        assert(_size > 1);
 
         auto isize = std::distance(first,last);
 
@@ -262,12 +258,12 @@ public:
     }
 
     mini_flat_set_alloc_proxy &operator=(const mini_flat_set_alloc_proxy &b) const {
-        POLY_OPS_ASSERT(alloc == b.alloc);
+        assert(alloc == b.alloc);
         data.assign(alloc,b.data);
         return *this;
     }
     mini_flat_set_alloc_proxy &operator=(mini_flat_set_alloc_proxy &&b) {
-        POLY_OPS_ASSERT(alloc == b.alloc);
+        assert(alloc == b.alloc);
         data.assign(alloc,std::move(b.data));
         return *this;
     }
