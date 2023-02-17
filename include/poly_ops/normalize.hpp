@@ -1625,8 +1625,7 @@ bool normalizer<Index,Coord>::check_intersection(
 }
 
 /* This is a modified version of the Bentley–Ottmann algorithm. Lines are broken
-   at intersections. Two end-points touching does not count as an intersection.
-   */
+at intersections. */
 template<std::integral Index,coordinate Coord>
 void normalizer<Index,Coord>::self_intersection() {
     using namespace detail;
@@ -1702,7 +1701,7 @@ void normalizer<Index,Coord>::self_intersection() {
                     events.current().status = event_status_t::deleted;
                 }
             } else {
-                sweep.insert(sweep_nodes[e.sweep_node]);
+                sweep.insert(e.sweep_node);
                 POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_BR
             }
             break;

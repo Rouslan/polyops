@@ -5,7 +5,8 @@
 #include <vector>
 #include <limits>
 #include <cassert>
-#include <boost/intrusive/rbtree_algorithms.hpp>
+
+#include "rbtree_algorithms.hpp"
 
 
 namespace poly_ops::detail {
@@ -77,6 +78,10 @@ template<typename T,typename Index,typename Base> struct offset_ptr : offset_ptr
     requires requires(UPtr::element_type *x) { const_cast<T*>(x); }
     static offset_ptr const_cast_from(const UPtr &x) noexcept {
         return {x.vec,x.i};
+    }
+
+    auto unconst() const {
+        return offset_ptr<std::remove_const_t<T>,Index,Base>(vec,i);
     }
 };
 
@@ -198,8 +203,7 @@ public:
     T *operator->() const { return ptr.get(); }
 
     auto unconst() const {
-        using uT = std::remove_const_t<T>;
-        return tree_iterator<uT,Index,Base>(offset_ptr<uT,Index,Base>(ptr.vec,ptr.i));
+        return tree_iterator<std::remove_const_t<T>,Index,Base>(ptr.unconst());
     }
 };
 

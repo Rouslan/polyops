@@ -14,7 +14,7 @@ keywords = ["polygon","inset","outset","geometry","boolean","union"]
 license = {file="LICENSE.txt"}
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
-    "License :: OSI Approved :: MIT No Attribution License (MIT-0)",
+    "License :: OSI Approved :: Boost Software License 1.0 (BSL-1.0)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Scientific/Engineering :: Mathematics"]
