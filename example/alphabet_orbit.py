@@ -93,18 +93,19 @@ class Scene:
 
         self.start_time = time.monotonic()
 
+        self.clip = poly_ops.Clipper()
+
     def get_current_loops(self,offset):
         offset = np.array(offset,dtype=NP_COORD)
 
         delta = time.monotonic() - self.start_time
 
-        input_loops = []
         for shape in self.shapes:
-            input_loops.extend(shape.get_coords(delta,offset))
+            self.clip.add_loops_subject(shape.get_coords(delta,offset))
 
-        input_loops.extend(loop + offset for loop in self.center_shape)
+        self.clip.add_loops_clip(loop + offset for loop in self.center_shape)
 
-        return poly_ops.normalize_flat(input_loops)
+        return self.clip.execute_flat(poly_ops.BoolOp.union)
 
 class Program:
     def __init__(self):

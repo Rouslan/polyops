@@ -24,3 +24,5 @@ target_link_libraries(random_shapes websocket_server)
 add_executable(unit_tests unit_tests.cpp)
 target_link_libraries(unit_tests Boost::unit_test_framework)
 target_compile_definitions(unit_tests PRIVATE BOOST_TEST_DYN_LINK)
+
+add_executable(simple simple.cpp)

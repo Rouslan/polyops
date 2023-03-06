@@ -19,6 +19,12 @@ add_custom_command(
     DEPENDS ${src_pyx}
     VERBATIM)
 
+if (MSVC)
+    add_compile_options(/W4)
+else()
+    add_compile_options(-Wall -Wextra -pedantic -fvisibility=hidden)
+endif()
+
 Python3_add_library(poly_ops MODULE WITH_SOABI ${src_cpp})
 target_link_libraries(poly_ops PRIVATE Python3::Module Python3::NumPy)
 

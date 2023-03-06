@@ -46,6 +46,7 @@ template<typename Coord> struct coord_ops {
     numbers, the value needs to be converted to an integer to use in a loop */
     static Coord to_coord(real_t x) { return static_cast<Coord>(x); }
 
+    /** Return a value with the same sign as "x" but with a magnitude of 1 */
     static real_t unit(real_t x) { return std::copysign(1.0,x); }
 
     static real_t pi() { return std::numbers::pi_v<real_t>; }
@@ -293,11 +294,11 @@ template<typename T,typename Coord> concept point_range
 template<typename T,typename Coord> concept point_range_range
     = std::ranges::sized_range<T> && point_range<std::ranges::range_value_t<T>,Coord>;
 
-/* Returns a positive number if clockwise, negative if counter-clockwise and
+/** Returns a positive number if clockwise, negative if counter-clockwise and
 zero if degenerate or exactly half of the polygon's area is inverted.
 
 This algorithm works on any polygon. For non-overlapping non-inverting polygons,
-more efficient methods exist. The magnitue of the return value is two times the
+more efficient methods exist. The magnitude of the return value is two times the
 area of the polygon.*/
 template<coordinate Coord,point_range<Coord> Points>
 long_coord_t<Coord> winding_dir(Points &&points)

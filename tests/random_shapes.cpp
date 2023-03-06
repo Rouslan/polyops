@@ -32,14 +32,14 @@ struct settings_t {
 };
 
 void random_loop(std::mt19937 &rand_gen,std::vector<point_t<coord_t>> &loop,index_t size) {
-    std::uniform_int_distribution<index_t> dist(0,1000);
+    std::uniform_int_distribution<coord_t> dist(0,1000);
     loop.resize(size);
     for(index_t i=0; i<size; ++i) loop[i] = {dist(rand_gen),dist(rand_gen)};
 }
 
 void do_one(op_type type,std::span<const std::vector<point_t<coord_t>>> loops) {
     if(type == op_type::normalize) {
-        normalize<false,index_t,coord_t>(loops);
+        union_op<false,index_t,coord_t>(loops);
     } else {
         if(mc__) {
             mc__->message(json::obj(

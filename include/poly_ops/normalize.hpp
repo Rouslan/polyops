@@ -2,7 +2,6 @@
 #define POLY_OPS_NORMALIZE_HPP
 
 #include <vector>
-#include <set>
 #include <map>
 #include <tuple>
 #include <algorithm>
@@ -17,7 +16,6 @@
 #include <span>
 #include <type_traits>
 #include <random>
-#include <boost/intrusive/set.hpp>
 
 #include "base.hpp"
 #include "sweep_set.hpp"
@@ -93,7 +91,7 @@ public:
 
     `original_i` is the index of the input point that the added point
     corresponds to. The value is what the array index of the original point
-    would be if all the input points were concatinated, in order, into a single
+    would be if all the input points were concatenated, in order, into a single
     array. This will not necessarily be called for every point of the input;
     duplicate consecutive points are ignored.
 
@@ -106,22 +104,48 @@ protected:
     ~point_tracker() = default;
 };
 
+enum class bool_op {union_,intersection,xor_,difference};
+enum class bool_cat {subject=0,clip=1};
+
 namespace detail {
-inline constexpr int UNDEF_LINE_BAL = std::numeric_limits<int>::lowest();
-inline constexpr int CHECK_LINE_BAL = UNDEF_LINE_BAL + 1;
+enum class line_state_t {undef,check,discard,keep,keep_rev};
+
+struct line_desc {
+    bool_cat cat;
+    line_state_t state;
+};
 
 template<typename Index,typename Coord> struct loop_point {
     point_t<Coord> data;
     Index next;
 
-    int line_bal;
+    union line_aux {
+        line_desc desc;
+        int loop_index;
+    } aux;
 
     loop_point() = default;
-    loop_point(point_t<Coord> data,Index next,int line_bal=UNDEF_LINE_BAL) :
-        data{data}, next{next}, line_bal{line_bal} {}
+    loop_point(point_t<Coord> data,Index next,bool_cat cat) :
+        data{data}, next{next}, aux{line_desc{cat,line_state_t::undef}} {}
     
     bool has_line_bal() const {
-        return line_bal > CHECK_LINE_BAL;
+        switch(aux.desc.state) {
+        case line_state_t::undef:
+        case line_state_t::check:
+            return false;
+        default:
+            return true;
+        }
+    }
+
+    bool keep() const {
+        switch(aux.desc.state) {
+        case line_state_t::keep_rev:
+        case line_state_t::keep:
+            return true;
+        default:
+            return false;
+        }
     }
 
     friend void swap(loop_point &a,loop_point &b) {
@@ -129,8 +153,7 @@ template<typename Index,typename Coord> struct loop_point {
 
         swap(a.data,b.data);
         swap(a.next,b.next);
-        swap(a.line_bal,b.line_bal);
-        swap(a.check_balance,b.check_balance);
+        swap(a.aux,b.aux);
     }
 };
 
@@ -201,7 +224,7 @@ XXX: this is not yet implemented. "processed" means both the forward and
 backward events of a particular segment have been looked at. Line segments are
 broken as soon as intersections are found, thus by the time a segment is marked
 as "processed" (indirectly via its events), it is guarantee not to intersect
-with any other segment. This allows us to skip rechecking interesections after
+with any other segment. This allows us to skip rechecking intersections after
 back-tracking. */
 enum class event_status_t {normal,processed,deleted};
 
@@ -329,7 +352,7 @@ using rand_generator = std::minstd_rand;
 
 /* Check if two line segments intersect.
 
-Returns "true" if the lines intersect. Adjecent lines do not count as
+Returns "true" if the lines intersect. Adjacent lines do not count as
 intersecting.
 
 'p' will be set to the point of intersection, or in the case of coincident
@@ -538,7 +561,7 @@ template<typename Index,typename Coord> class dual_line_balance {
 
     When the ray that we trace, intersects a point with lines extending in both
     left and right, we must not count this as two intersections, thus the
-    'line_segment_up_ray_intersection' function takes a 'hsign' paramter. When
+    'line_segment_up_ray_intersection' function takes a 'hsign' parameter. When
     a given line A̅B̅ intersects with the ray at point A, it only counts if
     'Bx - Ax' has the same sign as 'hsign'.
 
@@ -650,15 +673,16 @@ template<typename Index,typename Coord> class line_balance {
     std::pmr::vector<Index> &intrs_tmp;
     point_t<Coord> dp1;
     Coord hsign;
-    int wn;
+    int wn[2];
 
 public:
     line_balance(const loop_point<Index,Coord> *points,Index p1,std::pmr::vector<Index> &intrs_tmp) :
         points(points), p1(p1), intrs_tmp(intrs_tmp),
         dp1(line_delta(points,p1)),
-        hsign(hsign_of(dp1)), wn(dp1.x() < 0 ? -1 : 0)
+        hsign(hsign_of(dp1)), wn{0,0}
     {
         POLY_OPS_ASSERT(hsign);
+        if(dp1.x() < 0) wn[static_cast<int>(points[p1].aux.desc.cat)] = -1;
     }
 
     void check(segment<Index> s) {
@@ -677,13 +701,44 @@ public:
                 dp1,
                 main_i > p1))
             {
-                wn += a_is_main ? 1 : -1;
+                wn[static_cast<int>(points[main_i].aux.desc.cat)] += a_is_main ? 1 : -1;
                 intrs_tmp.push_back(main_i);
             }
         }
     }
 
-    int result() const { return wn; }
+    line_state_t result(bool_op op) const {
+        int ws = wn[static_cast<int>(bool_cat::subject)];
+        int wc = wn[static_cast<int>(bool_cat::clip)];
+
+        switch(op) {
+        case bool_op::union_:
+            return (ws + wc) == 0 ? line_state_t::keep : line_state_t::discard;
+        case bool_op::intersection:
+            if(points[p1].aux.desc.cat == bool_cat::clip) std::swap(ws,wc);
+            return (ws == 0 && wc > 0) ? line_state_t::keep : line_state_t::discard;
+        case bool_op::xor_:
+            if(points[p1].aux.desc.cat == bool_cat::clip) std::swap(ws,wc);
+            if(ws == 0) {
+                if(wc > 0) return line_state_t::keep_rev;
+                return line_state_t::keep;
+            }
+            return line_state_t::discard;
+        case bool_op::difference:
+            if(points[p1].aux.desc.cat == bool_cat::subject) {
+                if(ws == 0) {
+                    if(wc > 0) return line_state_t::discard;
+                    return line_state_t::keep;
+                }
+            } else if(wc == 0) {
+                if(ws > 0) return line_state_t::keep_rev;
+            }
+            return line_state_t::discard;
+        }
+
+        assert(false);
+        return line_state_t::discard;
+    }
 };
 
 /* order events by the X coordinates increasing and then by event type */
@@ -931,6 +986,7 @@ using sweep_t = sweep_set<cached_segment<Index,Coord>,Index,sweep_cmp<Index,Coor
 template<typename Index,typename Coord>
 using line_bal_sweep_t = sweep_set<cached_segment<Index,Coord>,Index,line_bal_sweep_cmp<Index>>;
 
+/* This is only used for debugging */
 template<typename Index,typename Coord>
 bool check_integrity(
     const std::pmr::vector<loop_point<Index,Coord>> &points,
@@ -1005,17 +1061,27 @@ bool consistent_order(const sweep_t<Index,Coord> &sweep) {
     return true;
 }
 
+template<typename Index> struct broken_starts_stack {
+    using allocator_type = std::pmr::polymorphic_allocator<Index>;
+
+    std::pmr::vector<Index> items;
+    std::size_t cur;
+
+    broken_starts_stack(const allocator_type &alloc) : items(alloc), cur(0) {}
+};
+
 template<typename Index,typename Coord>
-using broken_starts_t = std::pmr::map<point_t<Coord>,std::pmr::vector<Index>,point_less>;
+using broken_starts_t = std::pmr::map<point_t<Coord>,broken_starts_stack<Index>,point_less>;
 
-/* Follow the points connected to the point at "intr" until another
-intersection is reached or we wrapped around. Along the way, update the
-"line_bal" value to the value at "intr", and if "line_bal" at "intr" is not 0,
-merge all the "original_set" values into "intr".
+/* Follow the points connected to the point at "intr" until another intersection
+is reached or we wrapped around. Along the way, update the "aux.desc.state"
+value to the value at "intr", and if "aux.desc.state" at "intr" is not
+"line_state_t::keep" or "line_state_t::keep_rev", merge all the point values
+into "intr" via the point tracker.
 
-If "line_bal" at "intr" is 0 and the "line_bal" of the next intersection is not,
-add the point before the intersection to "broken_ends. If vice-versa, add the
-intersecting point to "broken_starts". */
+If "aux.desc.state" at "intr" is one of the "keep" values and the "state" of the
+next intersection is not, add the point before the intersection to "broken_ends.
+If vice-versa, add the intersecting point to "broken_starts". */
 template<typename Index,typename Coord>
 void follow_balance(
     loop_point<Index,Coord> *points,
@@ -1024,30 +1090,48 @@ void follow_balance(
     broken_starts_t<Index,Coord> &broken_starts,
     point_tracker<Index> *pt)
 {
-    POLY_OPS_ASSERT((points[intr].has_line_bal()));
+    POLY_OPS_ASSERT(points[intr].has_line_bal());
     Index next = points[intr].next;
     Index prev = intr;
-    while(next != intr) {
-        POLY_OPS_ASSERT(points[next].line_bal != CHECK_LINE_BAL);
+    for(;;) {
+        POLY_OPS_ASSERT(points[next].aux.desc.state != line_state_t::check);
         if(points[next].has_line_bal()) {
-            if(points[next].line_bal == 0) {
-                if(points[intr].line_bal != 0) {
-                    broken_starts[points[next].data].push_back(next);
-                    if(pt) pt->point_merge(next,intr);
-                }
-            } else if(points[intr].line_bal == 0) {
+            switch(points[intr].aux.desc.state) {
+            case line_state_t::discard:
+                break;
+            case line_state_t::keep:
+                broken_starts[points[intr].data].items.push_back(intr);
                 broken_ends.push_back(prev);
+                break;
+            case line_state_t::keep_rev:
+                /* After reversing the direction of the lines leaves us with a
+                missing line at the end (which is now the start) and an extra line
+                at the start (now the start), so the first point (intr) is repurposed
+                into the new end point. The point before the first might not have
+                been processed yet, so the coordinates of the point are not
+                updated until the broken starts and ends are recombined. */
+                broken_starts[points[next].data].items.push_back(intr);
+                broken_ends.push_back(prev == intr ? intr : points[intr].next);
+                points[intr].next = prev;
+                break;
+            default:
+                POLY_OPS_ASSERT(false);
             }
+
             break;
         }
 
-        points[next].line_bal = points[intr].line_bal;
-        if(points[intr].line_bal != 0) {
+        Index real_next_next = points[next].next;
+
+        points[next].aux.desc.state = points[intr].aux.desc.state;
+        if(points[intr].aux.desc.state == line_state_t::discard) {
             if(pt) pt->point_merge(next,intr);
+        } else if(points[intr].aux.desc.state == line_state_t::keep_rev) {
+            points[next].next = prev;
         }
 
         prev = next;
-        next = points[next].next;
+        next = real_next_next;
     }
 }
 
@@ -1145,21 +1229,20 @@ void find_loops(
     std::pmr::memory_resource *contig_mem)
 {
     for(Index i=0; i<static_cast<Index>(lpoints.size()); ++i) {
-        if(lpoints[i].line_bal == 0) {
-            int loop_i = static_cast<int>(loops.size()+1);
+        if(lpoints[i].aux.loop_index == -1) {
+            int loop_i = static_cast<int>(loops.size());
             loops.emplace_back(
                 loop_location<Index>{i,1},
                 std::pmr::vector<temp_polygon<Index>*>(contig_mem));
 
-            /* give this a non-zero value to prevent this point from being
-            scanned again */
-            lpoints[i].line_bal = loop_i;
+            /* prevent this point from being scanned again */
+            lpoints[i].aux.loop_index = loop_i;
 
             for(Index j = lpoints[i].next; j != i; j = lpoints[j].next) {
-                POLY_OPS_ASSERT(lpoints[j].line_bal == 0);
+                POLY_OPS_ASSERT(lpoints[j].aux.loop_index == -1);
 
                 ++loops.back().loop_loc.size;
-                lpoints[j].line_bal = loop_i;
+                lpoints[j].aux.loop_index = loop_i;
             }
         }
     }
@@ -1168,19 +1251,19 @@ void find_loops(
 template<typename Index,typename Coord>
 intr_array_t<Index> unique_sorted_loop_points(
     const std::pmr::vector<loop_point<Index,Coord>> &lpoints,
-    intr_array_t<Index> &&samples,
+    const intr_array_t<Index> &samples,
     std::pmr::memory_resource *contig_mem)
 {
     intr_array_t<Index> ordered_loops(contig_mem);
     ordered_loops.reserve(samples.size());
     for(auto &item : samples) {
-        if(lpoints[item.p].has_line_bal()) {
+        if(lpoints[item.p].aux.loop_index >= 0) {
             ordered_loops.emplace_back(item.p,std::move(item.hits));
         }
     }
 
     auto loop_id = [&](const intr_t<Index> &item){
-        return lpoints[item.p].line_bal;
+        return lpoints[item.p].aux.loop_index;
     };
     std::ranges::sort(ordered_loops,{},loop_id);
     ordered_loops.resize(
@@ -1200,7 +1283,7 @@ void replace_line_indices_with_loop_indices(
     for(auto& item : ordered_loops) {
         for(Index i : item.hits) {
             point_t<Coord> d = lpoints[i].data - lpoints[lpoints[i].next].data;
-            inside[lpoints[i].line_bal-1]
+            inside[lpoints[i].aux.loop_index]
                 += ((d.x() ? d.x() : d.y()) > 0) ? 1 : -1;
         }
         std::size_t inside_count = 0;
@@ -1211,7 +1294,7 @@ void replace_line_indices_with_loop_indices(
         item.hits.resize(inside_count);
         std::ranges::fill(inside,0);
 
-        item.p = static_cast<Index>(lpoints[item.p].line_bal-1);
+        item.p = static_cast<Index>(lpoints[item.p].aux.loop_index);
     }
 }
 
@@ -1248,7 +1331,7 @@ template<typename Index,typename Coord>
 std::pmr::vector<temp_polygon<Index>*> loop_hierarchy(
     std::pmr::vector<loop_point<Index,Coord>> &lpoints,
     std::pmr::vector<temp_polygon<Index>> &loops,
-    intr_array_t<Index> &samples,
+    const intr_array_t<Index> &samples,
     std::pmr::memory_resource *contig_mem)
 {
     auto ordered_loops = unique_sorted_loop_points<Index,Coord>(lpoints,samples,contig_mem);
@@ -1327,7 +1410,7 @@ template<typename Index,typename Coord>
 using temp_polygon_range = decltype(
     detail::make_temp_polygon_range<Index,Coord>({},{}));
 
-template<std::integral Index,coordinate Coord> class normalizer {
+template<std::integral Index,coordinate Coord> class clipper {
     std::pmr::memory_resource *contig_mem;
     std::pmr::unsynchronized_pool_resource discrete_mem;
 
@@ -1348,8 +1431,7 @@ template<std::integral Index,coordinate Coord> class normalizer {
     std::pmr::vector<detail::temp_polygon<Index>> loops_out;
 
     void self_intersection();
-    void normalize();
-    void calc_line_bal();
+    void calc_line_bal(bool_op op);
     Index split_segment(
         detail::sweep_t<Index,Coord> &sweep,
         Index s,
@@ -1365,14 +1447,15 @@ public:
     point_tracker<Index> *pt;
 
     class point_sink {
-        friend class normalizer;
+        friend class clipper;
 
-        normalizer &n;
+        clipper &n;
         point_t<Coord> prev;
         Index first_i;
+        bool_cat cat;
         bool started;
 
-        point_sink(normalizer &n) : n(n), started(false) {}
+        point_sink(clipper &n,bool_cat cat) : n(n), cat(cat), started(false) {}
         point_sink(const point_sink&) = delete;
         point_sink(point_sink &&b) : n(b.n), prev(b.prev), first_i(b.first_i), started(b.started) {
             b.started = false;
@@ -1385,7 +1468,7 @@ public:
         ~point_sink();
     };
 
-    explicit normalizer(
+    explicit clipper(
         point_tracker<Index> *pt=nullptr,
         std::pmr::memory_resource *_contig_mem=nullptr) :
         contig_mem(_contig_mem == nullptr ? std::pmr::get_default_resource() : _contig_mem),
@@ -1404,17 +1487,49 @@ public:
     }
     
     /* Important: you cannot pass the return value of "get_output()" from the
-    same instance of "normalizer" to this function. If you want to feed the
+    same instance of "clipper" to this function. If you want to feed the
     results back into the same instance, make a copy of the data and pass the
     copy here. */
-    template<point_range<Coord> R> void add_loop(R &&loop);
+    template<point_range<Coord> R> void add_loop(R &&loop,bool_cat cat);
 
     /* Important: you cannot pass the return value of "get_output()" from the
-    same instance of "normalizer" to this function. If you want to feed the
+    same instance of "clipper" to this function. If you want to feed the
     results back into the same instance, make a copy of the data and pass the
     copy here. */
-    template<point_range_range<Coord> R> void add_loops(R &&loops) {
-        for(auto &&loop : loops) add_loop(std::forward<decltype(loop)>(loop));
+    template<point_range<Coord> R> void add_loop_subject(R &&loop) {
+        add_loop(std::forward<R>(loop),bool_cat::subject);
+    }
+
+    /* Important: you cannot pass the return value of "get_output()" from the
+    same instance of "clipper" to this function. If you want to feed the
+    results back into the same instance, make a copy of the data and pass the
+    copy here. */
+    template<point_range<Coord> R> void add_loop_clip(R &&loop) {
+        add_loop(std::forward<R>(loop),bool_cat::clip);
+    }
+
+    /* Important: you cannot pass the return value of "get_output()" from the
+    same instance of "clipper" to this function. If you want to feed the
+    results back into the same instance, make a copy of the data and pass the
+    copy here. */
+    template<point_range_range<Coord> R> void add_loops(R &&loops,bool_cat cat) {
+        for(auto &&loop : loops) add_loop(std::forward<decltype(loop)>(loop),cat);
+    }
+
+    /* Important: you cannot pass the return value of "get_output()" from the
+    same instance of "clipper" to this function. If you want to feed the
+    results back into the same instance, make a copy of the data and pass the
+    copy here. */
+    template<point_range_range<Coord> R> void add_loops_subject(R &&loops) {
+        add_loops(std::forward<R>(loops),bool_cat::subject);
+    }
+
+    /* Important: you cannot pass the return value of "get_output()" from the
+    same instance of "clipper" to this function. If you want to feed the
+    results back into the same instance, make a copy of the data and pass the
+    copy here. */
+    template<point_range_range<Coord> R> void add_loops_clip(R &&loops) {
+        add_loops(std::forward<R>(loops),bool_cat::clip);
     }
 
     /* Return a "point sink".
@@ -1422,15 +1537,17 @@ public:
     This is an alternative to adding loops with ranges. The return value is a
     functor that allows adding one point at a time. The destructor of the return
     value must be called before any other method of this instance of
-    "normalizer" is called.
+    "clipper" is called.
 
     Important: you cannot use the return value of "get_output()" from the same
-    instance of "normalizer" if this function is called. If you want to feed the
+    instance of "clipper" if this function is called. If you want to feed the
     results back into the same instance, make a copy of the data. */
-    point_sink add_loop() {
+    point_sink add_loop(bool_cat cat) {
         if(ran) reset();
-        return {*this};
+        return {*this,cat};
     }
+
+    void execute(bool_op op);
 
     /* Discard all loops added so far.
     
@@ -1438,7 +1555,7 @@ public:
     void reset();
 
     /* The output of this function has references to data in this instance of
-    "normalizer". The returned range is invalidated when "reset()",
+    "clipper". The returned range is invalidated when "reset()",
     "add_loop()", or "add_loops()" is called or if the instance is destroyed. To
     keep the data, make a copy. The data is also not sequential. */
     template<bool TreeOut>
@@ -1458,21 +1575,39 @@ template<bool TreeOut,std::integral Index,coordinate Coord,point_range_range<Coo
 std::conditional_t<TreeOut,
     temp_polygon_tree_range<Index,Coord>,
     temp_polygon_range<Index,Coord>>
-normalize(
+union_op(
     Input &&input,
     point_tracker<Index> *pt=nullptr,
     std::pmr::memory_resource *contig_mem=nullptr)
 {
-    normalizer<Index,Coord> n{pt,contig_mem};
-    n.add_loops(std::forward<Input>(input));
+    clipper<Index,Coord> n{pt,contig_mem};
+    n.add_loops(std::forward<Input>(input),bool_cat::subject);
+    n.execute(bool_op::union_);
+    return std::move(n).template get_output<TreeOut>();
+}
+
+template<bool TreeOut,std::integral Index,coordinate Coord,point_range_range<Coord> SInput,point_range_range<Coord> CInput>
+std::conditional_t<TreeOut,
+    temp_polygon_tree_range<Index,Coord>,
+    temp_polygon_range<Index,Coord>>
+boolean_op(
+    SInput &&subject,
+    CInput &&clip,
+    bool_op op,
+    point_tracker<Index> *pt=nullptr,
+    std::pmr::memory_resource *contig_mem=nullptr)
+{
+    clipper<Index,Coord> n{pt,contig_mem};
+    n.add_loops(std::forward<SInput>(subject),bool_cat::subject);
+    n.add_loops(std::forward<CInput>(clip),bool_cat::clip);
+    n.execute(op);
     return std::move(n).template get_output<TreeOut>();
 }
 
 
-
 template<std::integral Index,coordinate Coord>
 template<point_range<Coord> R>
-void normalizer<Index,Coord>::add_loop(R &&loop) {
+void clipper<Index,Coord>::add_loop(R &&loop,bool_cat cat) {
     if(ran) reset();
 
     auto p_itr = std::ranges::begin(loop);
@@ -1486,7 +1621,7 @@ void normalizer<Index,Coord>::add_loop(R &&loop) {
     for(point_t<Coord> p : std::ranges::subrange(p_itr,itr_end)) {
         ++original_i;
         if(first || prev != lpoints.back().data) {
-            lpoints.emplace_back(prev,static_cast<Index>(lpoints.size()+1));
+            lpoints.emplace_back(prev,static_cast<Index>(lpoints.size()+1),cat);
             if(pt) pt->point_added(original_i);
             first = false;
         }
@@ -1494,18 +1629,18 @@ void normalizer<Index,Coord>::add_loop(R &&loop) {
     }
     ++original_i;
     if(first || (prev != lpoints.back().data && prev != lpoints[first_i].data)) {
-        lpoints.emplace_back(prev,0);
+        lpoints.emplace_back(prev,0,cat);
         if(pt) pt->point_added(original_i);
     }
     lpoints.back().next = first_i;
-    lpoints.back().line_bal = detail::CHECK_LINE_BAL;
+    lpoints.back().aux.desc.state = detail::line_state_t::check;
 }
 
 template<std::integral Index,coordinate Coord>
-void normalizer<Index,Coord>::point_sink::operator()(const point_t<Coord> &p,Index orig_i) {
+void clipper<Index,Coord>::point_sink::operator()(const point_t<Coord> &p,Index orig_i) {
     if(started) {
         if(prev != n.lpoints.back().data) {
-            n.lpoints.emplace_back(prev,static_cast<Index>(n.lpoints.size()+1));
+            n.lpoints.emplace_back(prev,static_cast<Index>(n.lpoints.size()+1),cat);
             if(n.pt) n.pt->point_added(n.original_i);
         }
         prev = p;
@@ -1516,8 +1651,8 @@ void normalizer<Index,Coord>::point_sink::operator()(const point_t<Coord> &p,Ind
         /* Normally points aren't added until this is called with the next point
         or the destructor is called, but duplicate points aren't added anyway
         and adding it now means the "prev != n.lpoints.back().data" checks above
-        and in the desctructor are always safe. */
-        n.lpoints.emplace_back(prev,static_cast<Index>(n.lpoints.size())+1);
+        and in the destructor are always safe. */
+        n.lpoints.emplace_back(prev,static_cast<Index>(n.lpoints.size())+1,cat);
         if(n.pt) n.pt->point_added(n.original_i);
 
         started = true;
@@ -1525,25 +1660,25 @@ void normalizer<Index,Coord>::point_sink::operator()(const point_t<Coord> &p,Ind
     n.original_i = orig_i;
 }
 template<std::integral Index,coordinate Coord>
-normalizer<Index,Coord>::point_sink::~point_sink() {
+clipper<Index,Coord>::point_sink::~point_sink() {
     if(started) {
         if(prev != n.lpoints.back().data && prev != n.lpoints[first_i].data) {
-            n.lpoints.emplace_back(prev,0);
+            n.lpoints.emplace_back(prev,0,cat);
             if(n.pt) n.pt->point_added(n.original_i);
         }
         n.lpoints.back().next = first_i;
-        n.lpoints.back().line_bal = detail::CHECK_LINE_BAL;
+        n.lpoints.back().aux.desc.state = detail::line_state_t::check;
     }
 }
 
 template<std::integral Index,coordinate Coord>
-void normalizer<Index,Coord>::add_fb_events(Index sa,Index sb) {
+void clipper<Index,Coord>::add_fb_events(Index sa,Index sb) {
     events.add_fb_events(lpoints,sa,sb,static_cast<Index>(sweep_nodes.size()));
     sweep_nodes.emplace_back(detail::cached_segment<Index,Coord>(sa,sb,lpoints));
 }
 
 template<std::integral Index,coordinate Coord>
-Index normalizer<Index,Coord>::split_segment(
+Index clipper<Index,Coord>::split_segment(
     detail::sweep_t<Index,Coord> &sweep,
     Index s,
     const point_t<Coord> &c,
@@ -1570,7 +1705,8 @@ Index normalizer<Index,Coord>::split_segment(
 
     Index mid = lpoints.size();
     lpoints[sa].next = mid;
-    lpoints.emplace_back(c,sb,UNDEF_LINE_BAL);
+    lpoints.emplace_back(c,sb,lpoints[sa].aux.desc.cat);
+    POLY_OPS_ASSERT(lpoints[sa].aux.desc.cat == lpoints[sb].aux.desc.cat);
     POLY_OPS_ASSERT_SLOW(check_integrity(lpoints,sweep));
 
     /* even if the original line was not vertical, one of the new lines might
@@ -1590,7 +1726,7 @@ Index normalizer<Index,Coord>::split_segment(
 }
 
 template<std::integral Index,coordinate Coord>
-bool normalizer<Index,Coord>::check_intersection(
+bool clipper<Index,Coord>::check_intersection(
     detail::sweep_t<Index,Coord> &sweep,
     Index s1,
     Index s2)
@@ -1608,16 +1744,16 @@ bool normalizer<Index,Coord>::check_intersection(
 
             if(pt) pt->new_intersection(intr1,intr2);
 
-            lpoints[intr1].line_bal = CHECK_LINE_BAL;
-            lpoints[intr2].line_bal = CHECK_LINE_BAL;
+            lpoints[intr1].aux.desc.state = line_state_t::check;
+            lpoints[intr2].aux.desc.state = line_state_t::check;
 
             return true;
         } else {
             intr1 = at_edge[0] == at_edge_t::start ? sweep_nodes[s1].value.a : sweep_nodes[s1].value.b;
             intr2 = at_edge[1] == at_edge_t::start ? sweep_nodes[s2].value.a : sweep_nodes[s2].value.b;
 
-            lpoints[intr1].line_bal = CHECK_LINE_BAL;
-            lpoints[intr2].line_bal = CHECK_LINE_BAL;
+            lpoints[intr1].aux.desc.state = line_state_t::check;
+            lpoints[intr2].aux.desc.state = line_state_t::check;
         }
     }
 
@@ -1627,7 +1763,7 @@ bool normalizer<Index,Coord>::check_intersection(
 /* This is a modified version of the Bentley–Ottmann algorithm. Lines are broken
 at intersections. */
 template<std::integral Index,coordinate Coord>
-void normalizer<Index,Coord>::self_intersection() {
+void clipper<Index,Coord>::self_intersection() {
     using namespace detail;
 
     events.reserve(lpoints.size()*2 + 10);
@@ -1710,19 +1846,19 @@ void normalizer<Index,Coord>::self_intersection() {
 }
 
 template<std::integral Index,coordinate Coord>
-void normalizer<Index,Coord>::calc_line_bal() {
+void clipper<Index,Coord>::calc_line_bal(bool_op op) {
     using namespace detail;
 
     line_bal_sweep_t<Index,Coord> sweep(sweep_nodes);
 
     auto scan = [&,this](Index i) {
-        if(lpoints[i].line_bal == CHECK_LINE_BAL) {
+        if(lpoints[i].aux.desc.state == line_state_t::check) {
             samples.emplace_back(i,std::pmr::vector<Index>(contig_mem));
             line_balance<Index,Coord> lb{lpoints.data(),i,samples.back().hits};
             for(const sweep_node<Index,Coord> &s : sweep) lb.check(s.value);
             for(segment<Index> s : events.touching_removed(lpoints)) lb.check(s);
             for(segment<Index> s : events.touching_pending(lpoints)) lb.check(s);
-            lpoints[i].line_bal = lb.result();
+            lpoints[i].aux.desc.state = lb.result(op);
 
             POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_SAMPLE
         }
@@ -1754,7 +1890,7 @@ void normalizer<Index,Coord>::calc_line_bal() {
 }
 
 template<std::integral Index,coordinate Coord>
-void normalizer<Index,Coord>::normalize() {
+void clipper<Index,Coord>::execute(bool_op op) {
     POLY_OPS_ASSERT(!ran);
 
     ran = true;
@@ -1765,7 +1901,7 @@ void normalizer<Index,Coord>::normalize() {
     loops_out.clear();
 
     self_intersection();
-    calc_line_bal();
+    calc_line_bal(op);
 
     for(auto &intr : samples) {
         detail::follow_balance<Index,Coord>(lpoints.data(),intr.p,broken_ends,broken_starts,pt);
@@ -1777,29 +1913,44 @@ void normalizer<Index,Coord>::normalize() {
 #endif
 
     /* match all the points in broken_starts and broken_ends to make new loops
-    where all the points have a line balance of 0 */
+    with the remaining lines */
     for(auto intr : broken_ends) {
-        auto &os = broken_starts[lpoints[lpoints[intr].next].data];
+        auto p = lpoints[lpoints[intr].next].data;
+        auto os = broken_starts.find(p);
 
-        POLY_OPS_ASSERT(os.size());
+        POLY_OPS_ASSERT(os != broken_starts.end() && !os->second.items.empty() && os->second.cur < os->second.items.size());
 
-        if(pt) pt->point_merge(lpoints[intr].next,os.back());
-        lpoints[intr].next = os.back();
-        os.pop_back();
+        Index b_start = os->second.items[os->second.cur++];
+
+        //if(pt) pt->point_merge(lpoints[intr].next,b_start);
+
+        lpoints[intr].next = b_start;
     }
 
     // there shouldn't be any left
     POLY_OPS_ASSERT(std::all_of(
         broken_starts.begin(),
         broken_starts.end(),
-        [](const typename detail::broken_starts_t<Index,Coord>::value_type &v) { return std::get<1>(v).empty(); }));
+        [](const typename detail::broken_starts_t<Index,Coord>::value_type &v) {
+            return v.second.cur == v.second.items.size();
+        }));
+    
+    /* If a point had a state of "keep_rev", it was moved by
+    "detail::follow_balance()" but didn't have the coordinates updated. Update
+    them now. */
+    for(auto &bs_item : broken_starts) {
+        for(auto i : bs_item.second.items) {
+            lpoints[i].data = bs_item.first;
+        }
+    }
 
 #if POLY_OPS_GRAPHICAL_DEBUG
     delegate_drawing_trimmed(lpoints);
 #endif
 
     for(auto &lp : lpoints) {
-        if(lp.line_bal != 0) lp.line_bal = detail::UNDEF_LINE_BAL;
+        if(lp.keep()) lp.aux.loop_index = -1;
+        else lp.aux.loop_index = -2;
     }
 
     loops_out.clear();
@@ -1811,8 +1962,8 @@ template<bool TreeOut>
 std::conditional_t<TreeOut,
     borrowed_temp_polygon_tree_range<Index,Coord>,
     borrowed_temp_polygon_range<Index,Coord>>
-normalizer<Index,Coord>::get_output() & {
-    if(!ran) normalize();
+clipper<Index,Coord>::get_output() & {
+    POLY_OPS_ASSERT(ran);
 
     if constexpr(TreeOut) {
         auto top = loop_hierarchy(lpoints,loops_out,samples,contig_mem);
@@ -1830,8 +1981,8 @@ template<bool TreeOut>
 std::conditional_t<TreeOut,
     temp_polygon_tree_range<Index,Coord>,
     temp_polygon_range<Index,Coord>>
-normalizer<Index,Coord>::get_output() && {
-    if(!ran) normalize();
+clipper<Index,Coord>::get_output() && {
+    POLY_OPS_ASSERT(ran);
 
     if constexpr(TreeOut) {
         auto top = loop_hierarchy(lpoints,loops_out,samples,contig_mem);
@@ -1847,7 +1998,7 @@ normalizer<Index,Coord>::get_output() && {
 }
 
 template<std::integral Index,coordinate Coord>
-void normalizer<Index,Coord>::reset() {
+void clipper<Index,Coord>::reset() {
     lpoints.clear();
     samples.clear();
     sweep_nodes.resize(1);

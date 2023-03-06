@@ -119,8 +119,6 @@ template<typename Index,typename Base> struct _value_traits {
     using pointer = node*;
     using const_pointer = const node*;
     
-    static constexpr boost::intrusive::link_mode_type link_mode = boost::intrusive::normal_link;
-
     node_ptr to_node_ptr(value_type &value) const noexcept {
         return {vec,static_cast<Index>(&value - vec->data())};
     }
@@ -141,7 +139,7 @@ public:
     // this needs to be non-const
     using node_ptr = _node_traits<Index,Base>::node_ptr;
 
-    using node_algo = boost::intrusive::rbtree_algorithms<_node_traits<Index,Base>>;
+    using node_algo = rbtree_algorithms<_node_traits<Index,Base>>;
 
     using iterator_category = std::bidirectional_iterator_tag;
     using difference_type = std::ptrdiff_t;
@@ -218,7 +216,7 @@ public:
     using node_traits = value_traits::node_traits;
     using node_ptr = value_traits::node_ptr;
     using const_node_ptr = value_traits::const_node_ptr;
-    using node_algo = boost::intrusive::rbtree_algorithms<node_traits>;
+    using node_algo = rbtree_algorithms<node_traits>;
 
     struct cmp_wrapper {
         Compare base_cmp;

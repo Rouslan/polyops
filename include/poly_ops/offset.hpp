@@ -114,7 +114,7 @@ public:
 
 template<typename Index,typename Coord>
 void add_offset_point(
-    typename normalizer<Index,Coord>::point_sink &sink,
+    typename clipper<Index,Coord>::point_sink &sink,
     real_coord_t<Coord> magnitude,
     Coord arc_step_size,
     Index &orig_i,
@@ -151,12 +151,13 @@ void add_offset_point(
 
 template<typename Index,typename Coord,point_range<Coord> R>
 void add_offset_loop(
-    normalizer<Index,Coord> &n,
+    clipper<Index,Coord> &n,
     R &&input,
+    bool_cat cat,
     real_coord_t<Coord> magnitude,
     std::type_identity_t<Coord> arc_step_size)
 {
-    auto sink = n.add_loop();
+    auto sink = n.add_loop(cat);
     Index orig_i = sink.last_orig_i();
     auto itr = std::ranges::begin(input);
     auto end = std::ranges::end(input);
@@ -188,6 +189,26 @@ void add_offset_loop(
     detail::add_offset_point(sink,magnitude,arc_step_size,orig_i,prev2,prev1,first);
 }
 
+template<typename Index,typename Coord,point_range<Coord> R>
+void add_offset_loop_subject(
+    clipper<Index,Coord> &n,
+    R &&input,
+    real_coord_t<Coord> magnitude,
+    std::type_identity_t<Coord> arc_step_size)
+{
+    add_offset_loop(n,std::forward<R>(input),bool_cat::subject,magnitude,arc_step_size);
+}
+
+template<typename Index,typename Coord,point_range<Coord> R>
+void add_offset_loop_clip(
+    clipper<Index,Coord> &n,
+    R &&input,
+    real_coord_t<Coord> magnitude,
+    std::type_identity_t<Coord> arc_step_size)
+{
+    add_offset_loop(n,std::forward<R>(input),bool_cat::clip,magnitude,arc_step_size);
+}
+
 template<bool TreeOut,std::integral Index,coordinate Coord,point_range_range<Coord> Input>
 std::conditional_t<TreeOut,
     temp_polygon_tree_range<Index,Coord>,
@@ -199,8 +220,9 @@ offset(
     point_tracker<Index> *pt=nullptr,
     std::pmr::memory_resource *contig_mem=nullptr)
 {
-    normalizer<Index,Coord> n{pt,contig_mem};
-    for(auto &&loop : input) add_offset_loop(n,std::forward<decltype(loop)>(loop),magnitude,arc_step_size);
+    clipper<Index,Coord> n{pt,contig_mem};
+    for(auto &&loop : input) add_offset_loop(n,std::forward<decltype(loop)>(loop),bool_cat::subject,magnitude,arc_step_size);
+    n.execute(bool_op::union_);
     return std::move(n).template get_output<TreeOut>();
 }
 

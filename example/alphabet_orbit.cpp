@@ -62,35 +62,32 @@ struct satellite {
 
 using shapes_t = std::vector<satellite>;
 
-auto offset_loop(const std::vector<poly_ops::point_t<coord_t>> &loop,poly_ops::point_t<coord_t> offset) {
-    offset[0] += 3000;
-    offset[1] += 3000;
-    return loop | std::views::transform([=](auto &p) { return p + offset; });
-}
-
 struct scene {
     std::vector<satellite> shapes;
     loops_t center_shape;
     std::vector<std::vector<SDL_FPoint>> line_buffer;
+    poly_ops::clipper<index_t,coord_t> clip;
 
     void update(double delta) {
         line_buffer.clear();
+        clip.reset();
 
-        /* instead of allocating memory for each transformed input loop, we pass
-        range views */
-        std::vector<decltype(offset_loop(shapes[0].loops[0],{}))> input;
         for(auto &shape : shapes) {
             auto offset = shape.orb(delta);
+            offset[0] += 3000;
+            offset[1] += 3000;
             for(auto &loop : shape.loops) {
-                input.push_back(offset_loop(loop,offset));
+                clip.add_loop_subject(loop | std::views::transform([=](auto &p) { return p + offset; }));
             }
         }
 
         for(auto &loop : center_shape) {
-            input.push_back(offset_loop(loop,{0,0}));
+            clip.add_loop_clip(loop | std::views::transform([=](auto &p) { return p + poly_ops::point_t<coord_t>(3000,3000); }));
         }
 
-        auto loops = poly_ops::normalize<false,index_t,coord_t>(input);
+        clip.execute(poly_ops::bool_op::difference);
+
+        auto loops = clip.get_output<false>();
 
         for(auto &&loop : loops) {
             assert(loop.size());
