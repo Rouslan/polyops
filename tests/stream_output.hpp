@@ -111,8 +111,8 @@ template<typename T> struct delimited_t {
     T items;
     const char *delimiter;
 
-    explicit delimited_t(T items,const char *delimiter=",")
-        : items(items), delimiter(delimiter) {}
+    explicit delimited_t(T &&items,const char *delimiter=",")
+        : items(std::forward<T>(items)), delimiter(delimiter) {}
 };
 template<typename R> delimited_t<R> delimited(R &&items) {
     return delimited_t<R>{std::forward<R>(items)};
@@ -142,6 +142,19 @@ template<typename Key,typename Value,typename Compare,typename Alloc> struct pp_
     }
 };
 
+template<typename T> struct pp_printer<delimited_t<T>> {
+    void operator()(std::ostream &os,indent_t indent,delimited_t<T> &d) const {
+        bool started = false;
+        indent = indent + 1;
+        for(auto &&item : d.items) {
+            if(started) os << ',';
+            started = true;
+            os << indent;
+            os << pp(item,indent);
+        }
+    }
+};
+
 template<typename T,typename Alloc> struct pp_printer<std::vector<T,Alloc>> {
     void operator()(std::ostream &os,indent_t indent,const std::vector<T,Alloc> &x) const {
         os << "std::vector{";
@@ -154,6 +167,12 @@ template<typename T,typename Alloc> struct pp_printer<std::vector<T,Alloc>> {
             os << pp(item,indent);
         }
         os << '}';
+    }
+};
+
+template<typename Index> struct pp_printer<poly_ops::detail::broken_starts_stack<Index>> {
+    void operator()(std::ostream &os,indent_t indent,const poly_ops::detail::broken_starts_stack<Index> &bsstack) const {
+        os << pp(bsstack.items,indent);
     }
 };
 

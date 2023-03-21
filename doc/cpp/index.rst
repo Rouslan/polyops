@@ -3,4 +3,5 @@ C++ API
 
 .. toctree::
     base
-    clipper
+    clip
+    int128

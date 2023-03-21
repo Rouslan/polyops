@@ -359,7 +359,7 @@ private:
     }
 
     _value_traits<Index,T> traits_val;
-    cmp_wrapper compare;
+    [[no_unique_address]] cmp_wrapper compare;
 };
 
 }

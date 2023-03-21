@@ -263,6 +263,62 @@ public:
       return (y == end || comp(key, y)) ? end : y;
    }
 
+   template< class KeyType, class KeyNodePtrCompare>
+   static std::pair<node_ptr, node_ptr> bounded_range
+      ( const_node_ptr header
+      , const KeyType &lower_key
+      , const KeyType &upper_key
+      , KeyNodePtrCompare comp
+      , bool left_closed
+      , bool right_closed)
+   {
+      node_ptr y = header.unconst();
+      node_ptr x = NodeTraits::get_parent(header);
+
+      while(x){
+         //If x is less than lower_key the target
+         //range is on the right part
+         if(comp(x, lower_key)){
+            //Check for invalid input range
+            assert(comp(x, upper_key));
+            x = NodeTraits::get_right(x);
+         }
+         //If the upper_key is less than x, the target
+         //range is on the left part
+         else if(comp(upper_key, x)){
+            y = x;
+            x = NodeTraits::get_left(x);
+         }
+         else{
+            //x is inside the bounded range(lower_key <= x <= upper_key),
+            //so we must split lower and upper searches
+            //
+            //Sanity check: if lower_key and upper_key are equal, then both left_closed and right_closed can't be false
+            assert(left_closed || right_closed || comp(lower_key, x) || comp(x, upper_key));
+            return std::pair<node_ptr,node_ptr>(
+               left_closed
+                  //If left_closed, then comp(x, lower_key) is already the lower_bound
+                  //condition so we save one comparison and go to the next level
+                  //following traditional lower_bound algo
+                  ? lower_bound_loop(NodeTraits::get_left(x), x, lower_key, comp)
+                  //If left-open, comp(x, lower_key) is not the upper_bound algo
+                  //condition so we must recheck current 'x' node with upper_bound algo
+                  : upper_bound_loop(x, y, lower_key, comp)
+            ,
+               right_closed
+                  //If right_closed, then comp(upper_key, x) is already the upper_bound
+                  //condition so we can save one comparison and go to the next level
+                  //following lower_bound algo
+                  ? upper_bound_loop(NodeTraits::get_right(x), y, upper_key, comp)
+                  //If right-open, comp(upper_key, x) is not the lower_bound algo
+                  //condition so we must recheck current 'x' node with lower_bound algo
+                  : lower_bound_loop(x, y, upper_key, comp)
+            );
+         }
+      }
+      return std::pair<node_ptr,node_ptr> (y, y);
+   }
+
    template<class KeyType, class KeyNodePtrCompare>
    static std::size_t count
       (const_node_ptr header, const KeyType &key, KeyNodePtrCompare comp)

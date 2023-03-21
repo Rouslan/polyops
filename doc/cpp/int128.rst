@@ -1,0 +1,26 @@
+poly_ops/clipper.hpp
+=====================
+
+.. cpp:namespace:: poly_ops
+
+
+Macros
+------------------
+
+.. c:macro:: POLY_OPS_HAVE_128BIT_INT
+
+    If :cpp:class:`basic_int128` is defined, this has a value of 1. Otherwise,
+    this is 0.
+
+Types
+------------------
+
+.. cpp:class:: basic_int128
+
+    A signed 128-bit integer.
+
+    This only supports some of the operations that built-in integers support:
+    addition, subtraction, negation and comparison. Multiplication and bit-wise
+    operations are absent. Additionally, the standard library will not recognize
+    this class as an integer (e.g.: ``std::is_integer<poly_ops::basic128>`` will
+    have a value of `false`).

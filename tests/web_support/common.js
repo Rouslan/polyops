@@ -1,7 +1,7 @@
 const POINT_HIT_CIRCLE_R = 5;
 
-const state_classes = [null,"sweep","inverted","nested","tooriginal"];
-const event_types = ['vforward','backward','forward','vbackward','calc_balance_intr','calc_intr_sample'];
+const state_classes = [null,"s_sweep","s_reverse","s_discard","s_tooriginal"];
+const event_types = ['vforward','backward','forward','vbackward'];
 
 function vGetX(a) {
     if(typeof a === 'number') return a;

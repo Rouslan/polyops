@@ -17,6 +17,10 @@
 #include <type_traits>
 #include <random>
 
+/* POLY_OPS_ASSERT can be defined to use exception, so it can't be used inside
+functions marked as "noexcept". In such cases, "assert" is used. */
+#include <cassert>
+
 #include "base.hpp"
 #include "sweep_set.hpp"
 
@@ -26,7 +30,6 @@
 #endif
 
 #ifndef POLY_OPS_ASSERT
-#include <cassert>
 #define POLY_OPS_ASSERT assert
 #endif
 
@@ -104,14 +107,31 @@ protected:
     ~point_tracker() = default;
 };
 
-enum class bool_op {union_,intersection,xor_,difference};
-enum class bool_cat {subject=0,clip=1};
+enum class bool_op {
+    /* Boolean operation `subject` OR `clip` */
+    union_,
+
+    /* Boolean operation `subject` AND `clip` */
+    intersection,
+
+    /* Boolean operation `subject` XOR `clip` */
+    xor_,
+
+    /* Boolean operation `subject` AND NOT `clip` */
+    difference,
+
+    /* Keep all lines but make it so all outer lines are clockwise polygons, all
+    singly nested lines are counter-clockwise polygons, all doubly-nested
+    lines are clockwise polygons, and so forth. */
+    normalize};
+
+enum class bool_set {subject=0,clip=1};
 
 namespace detail {
 enum class line_state_t {undef,check,discard,keep,keep_rev};
 
 struct line_desc {
-    bool_cat cat;
+    bool_set cat;
     line_state_t state;
 };
 
@@ -125,8 +145,10 @@ template<typename Index,typename Coord> struct loop_point {
     } aux;
 
     loop_point() = default;
-    loop_point(point_t<Coord> data,Index next,bool_cat cat) :
-        data{data}, next{next}, aux{line_desc{cat,line_state_t::undef}} {}
+    loop_point(const loop_point &b) = default;
+    loop_point(point_t<Coord> data,Index next,bool_set cat)
+        noexcept(std::is_nothrow_copy_constructible_v<point_t<Coord>>)
+        : data{data}, next{next}, aux{line_desc{cat,line_state_t::undef}} {}
     
     bool has_line_bal() const {
         switch(aux.desc.state) {
@@ -148,7 +170,12 @@ template<typename Index,typename Coord> struct loop_point {
         }
     }
 
-    friend void swap(loop_point &a,loop_point &b) {
+    bool_set bset() const { return aux.desc.cat; }
+    bool_set &bset() { return aux.desc.cat; }
+    line_state_t state() const { return aux.desc.state; }
+    line_state_t &state() { return aux.desc.state; }
+
+    friend void swap(loop_point &a,loop_point &b) noexcept(std::is_nothrow_swappable_v<point_t<Coord>>) {
         using std::swap;
 
         swap(a.data,b.data);
@@ -162,7 +189,7 @@ template<typename Index> struct segment_common {
     Index b;
 
     segment_common() = default;
-    segment_common(Index a,Index b) : a{a}, b{b} {}
+    segment_common(Index a,Index b) noexcept : a{a}, b{b} {}
     segment_common(const segment_common&) = default;
 
     /* returns true if point 'a' comes before point 'b' in the loop */
@@ -182,7 +209,7 @@ protected:
 template<typename Index> struct segment : segment_common<Index> {
     using segment_common<Index>::segment_common;
 
-    segment(const segment_common<Index> &s) : segment_common<Index>(s) {}
+    segment(const segment_common<Index> &s) noexcept : segment_common<Index>(s) {}
 
     auto a_x(const auto &points) const { return points[this->a].data[0]; }
     auto a_y(const auto &points) const { return points[this->a].data[1]; }
@@ -196,6 +223,7 @@ template<typename Index,typename Coord> struct cached_segment : segment_common<I
 
     cached_segment() = default;
     cached_segment(Index a,Index b,const point_t<Coord> &pa,const point_t<Coord> &pb)
+        noexcept(std::is_nothrow_copy_constructible_v<point_t<Coord>>)
         : segment_common<Index>{a,b}, pa{pa}, pb{pb} {}
     template<typename T> cached_segment(const segment_common<Index> &s,const T &points)
         : segment_common<Index>{s}, pa{points[s.a].data}, pb{points[s.b].data} {}
@@ -235,7 +263,7 @@ template<typename Index> struct event {
     event_status_t status;
 
     event() = default;
-    event(segment<Index> ab,Index sweep_node,event_type_t type)
+    event(segment<Index> ab,Index sweep_node,event_type_t type) noexcept
         : ab{ab}, sweep_node{sweep_node}, type{type}, status{event_status_t::normal} {}
     event(const event &b) = default;
 
@@ -264,6 +292,10 @@ template<typename T> bool between(T x,T lo,T hi) {
     return x > lo && x < hi;
 }
 
+template<typename Coord> long_coord_t<Coord> int_dot(const point_t<Coord> &a,const point_t<Coord> &b) {
+    return coord_ops<Coord>::mul(a[0],b[0]) + coord_ops<Coord>::mul(a[1],b[1]);
+}
+
 template<typename Index,typename Coord>
 bool intersects_parallel(
     const cached_segment<Index,Coord> &s1,
@@ -271,18 +303,15 @@ bool intersects_parallel(
     point_t<Coord> &p,
     std::span<at_edge_t,2> at_edge)
 {
-    using long_t = long_coord_t<Coord>;
-    using std::swap;
-
     if(triangle_winding(s1.pa,s1.pb,s2.pa) != 0) return false;
 
     /* Reduce each line segment into a 1D value. Each d* value is the scalar
     projection of the corresponding s*.* point times the magnitude of s1. */
-    point_t<long_t> v1b = vcast<long_t>(s1.pb-s1.pa);
-    long_t d1a = static_cast<long_t>(0);
-    long_t d1b = square(v1b);
-    long_t d2a = vdot(s2.pa-s1.pa,v1b);
-    long_t d2b = vdot(s2.pb-s1.pa,v1b);
+    point_t<Coord> v1b = s1.pb - s1.pa;
+    auto d1a = static_cast<long_coord_t<Coord>>(0);
+    auto d1b = int_dot(v1b,v1b);
+    auto d2a = int_dot(s2.pa-s1.pa,v1b);
+    auto d2b = int_dot(s2.pb-s1.pa,v1b);
 
     POLY_OPS_ASSERT(0 != d1b && d2a != d2b);
 
@@ -366,8 +395,6 @@ bool intersects(
     std::span<at_edge_t,2> at_edge,
     rand_generator &rgen)
 {
-    using long_t = long_coord_t<Coord>;
-
     const Coord x1 = s1.pa.x();
     const Coord y1 = s1.pa.y();
     const Coord x2 = s1.pb.x();
@@ -377,7 +404,7 @@ bool intersects(
     const Coord x4 = s2.pb.x();
     const Coord y4 = s2.pb.y();
 
-    long_t d = static_cast<long_t>(x1-x2)*(y3-y4) - static_cast<long_t>(y1-y2)*(x3-x4);
+    long_coord_t<Coord> d = coord_ops<Coord>::mul(x1-x2,y3-y4) - coord_ops<Coord>::mul(y1-y2,x3-x4);
     if(d == 0) return intersects_parallel(s1,s2,p,at_edge);
 
     /* Connected lines do not count as intersecting. This check must be done
@@ -385,8 +412,8 @@ bool intersects(
     than one point of intersection. */
     if(s1.a == s2.a || s1.a == s2.b || s1.b == s2.a || s1.b == s2.b) return false;
 
-    long_t t_i = static_cast<long_t>(x1-x3)*(y3-y4) - static_cast<long_t>(y1-y3)*(x3-x4);
-    long_t u_i = static_cast<long_t>(x1-x3)*(y1-y2) - static_cast<long_t>(y1-y3)*(x1-x2);
+    long_coord_t<Coord> t_i = coord_ops<Coord>::mul(x1-x3,y3-y4) - coord_ops<Coord>::mul(y1-y3,x3-x4);
+    long_coord_t<Coord> u_i = coord_ops<Coord>::mul(x1-x3,y1-y2) - coord_ops<Coord>::mul(y1-y3,x1-x2);
 
     if(d > 0) {
         if(t_i < 0 || t_i > d || u_i < 0 || u_i > d) return false;
@@ -443,8 +470,8 @@ bool intersects(
 
 template<typename Coord>
 bool lower_angle(point_t<Coord> ds,point_t<Coord> dp,bool tie_breaker) {
-    auto v = static_cast<long_coord_t<Coord>>(ds.y())*dp.x();
-    auto w = static_cast<long_coord_t<Coord>>(dp.y())*ds.x();
+    long_coord_t<Coord> v = coord_ops<Coord>::mul(ds.y(),dp.x());
+    long_coord_t<Coord> w = coord_ops<Coord>::mul(dp.y(),ds.x());
     return v < w || (v == w && tie_breaker);
 }
 
@@ -470,8 +497,6 @@ template<typename Coord> bool line_segment_up_ray_intersection(
     point_t<Coord> dp,
     bool tie_breaker)
 {
-    using long_t = long_coord_t<Coord>;
-
     POLY_OPS_ASSERT(sa.x() <= sb.x());
 
     point_t<Coord> ds = sb - sa;
@@ -480,8 +505,8 @@ template<typename Coord> bool line_segment_up_ray_intersection(
     if(p.x() < sa.x() || (p.x() == sa.x() && hsign < 0)) return false;
     if(p.x() > sb.x() || (p.x() == sb.x() && hsign > 0)) return false;
 
-    long_t t = static_cast<long_t>(p.x()-sa.x())*ds.y();
-    long_t u = static_cast<long_t>(p.y()-sa.y())*ds.x();
+    long_coord_t<Coord> t = coord_ops<Coord>::mul(p.x()-sa.x(),ds.y());
+    long_coord_t<Coord> u = coord_ops<Coord>::mul(p.y()-sa.y(),ds.x());
     return t < u || (t == u && lower_angle(ds,dp,tie_breaker));
 }
 
@@ -502,8 +527,6 @@ template<typename Coord> std::tuple<bool,bool> dual_line_segment_up_ray_intersec
     point_t<Coord> dp2,
     bool tie_breaker2)
 {
-    using long_t = long_coord_t<Coord>;
-
     POLY_OPS_ASSERT(sa.x() <= sb.x());
 
     point_t<Coord> ds = sb - sa;
@@ -517,8 +540,8 @@ template<typename Coord> std::tuple<bool,bool> dual_line_segment_up_ray_intersec
     if(p.x() == sa.x()) r = {hsign1 > 0,hsign2 > 0};
     else if(p.x() == sb.x()) r = {hsign1 < 0,hsign2 < 0};
 
-    long_t t = static_cast<long_t>(p.x()-sa.x())*ds.y();
-    long_t u = static_cast<long_t>(p.y()-sa.y())*ds.x();
+    long_coord_t<Coord> t = coord_ops<Coord>::mul(p.x()-sa.x(),ds.y());
+    long_coord_t<Coord> u = coord_ops<Coord>::mul(p.y()-sa.y(),ds.x());
     if(t > u) return {false,false};
     if(t == u) {
         std::get<0>(r) = std::get<0>(r) && lower_angle(ds,dp1,tie_breaker1);
@@ -682,7 +705,7 @@ public:
         hsign(hsign_of(dp1)), wn{0,0}
     {
         POLY_OPS_ASSERT(hsign);
-        if(dp1.x() < 0) wn[static_cast<int>(points[p1].aux.desc.cat)] = -1;
+        if(dp1.x() < 0) wn[static_cast<int>(points[p1].bset())] = -1;
     }
 
     void check(segment<Index> s) {
@@ -701,31 +724,32 @@ public:
                 dp1,
                 main_i > p1))
             {
-                wn[static_cast<int>(points[main_i].aux.desc.cat)] += a_is_main ? 1 : -1;
+                wn[static_cast<int>(points[main_i].bset())] += a_is_main ? 1 : -1;
                 intrs_tmp.push_back(main_i);
             }
         }
     }
 
     line_state_t result(bool_op op) const {
-        int ws = wn[static_cast<int>(bool_cat::subject)];
-        int wc = wn[static_cast<int>(bool_cat::clip)];
+        int ws = wn[static_cast<int>(bool_set::subject)];
+        int wc = wn[static_cast<int>(bool_set::clip)];
+        int w = ws + wc;
 
         switch(op) {
         case bool_op::union_:
-            return (ws + wc) == 0 ? line_state_t::keep : line_state_t::discard;
+            return w == 0 ? line_state_t::keep : line_state_t::discard;
         case bool_op::intersection:
-            if(points[p1].aux.desc.cat == bool_cat::clip) std::swap(ws,wc);
+            if(points[p1].bset() == bool_set::clip) std::swap(ws,wc);
             return (ws == 0 && wc > 0) ? line_state_t::keep : line_state_t::discard;
         case bool_op::xor_:
-            if(points[p1].aux.desc.cat == bool_cat::clip) std::swap(ws,wc);
+            if(points[p1].bset() == bool_set::clip) std::swap(ws,wc);
             if(ws == 0) {
                 if(wc > 0) return line_state_t::keep_rev;
                 return line_state_t::keep;
             }
             return line_state_t::discard;
         case bool_op::difference:
-            if(points[p1].aux.desc.cat == bool_cat::subject) {
+            if(points[p1].bset() == bool_set::subject) {
                 if(ws == 0) {
                     if(wc > 0) return line_state_t::discard;
                     return line_state_t::keep;
@@ -734,6 +758,9 @@ public:
                 if(ws > 0) return line_state_t::keep_rev;
             }
             return line_state_t::discard;
+        case bool_op::normalize:
+            if(w < 0) w = -1 - w;
+            return w % 2 == 0 ? line_state_t::keep : line_state_t::keep_rev;
         }
 
         assert(false);
@@ -1094,9 +1121,9 @@ void follow_balance(
     Index next = points[intr].next;
     Index prev = intr;
     for(;;) {
-        POLY_OPS_ASSERT(points[next].aux.desc.state != line_state_t::check);
+        POLY_OPS_ASSERT(points[next].state() != line_state_t::check);
         if(points[next].has_line_bal()) {
-            switch(points[intr].aux.desc.state) {
+            switch(points[intr].state()) {
             case line_state_t::discard:
                 break;
             case line_state_t::keep:
@@ -1104,12 +1131,13 @@ void follow_balance(
                 broken_ends.push_back(prev);
                 break;
             case line_state_t::keep_rev:
-                /* After reversing the direction of the lines leaves us with a
-                missing line at the end (which is now the start) and an extra line
-                at the start (now the start), so the first point (intr) is repurposed
-                into the new end point. The point before the first might not have
-                been processed yet, so the coordinates of the point are not
-                updated until the broken starts and ends are recombined. */
+                /* Reversing the direction of the lines leaves us with a missing
+                line at the end (which is now the start) and an extra line at
+                the start (now the start), so the first point (intr) is
+                repurposed into the new end point. The point before the first
+                might not have been processed yet, so the coordinates of the
+                point are not updated until the broken starts and ends are
+                recombined. */
                 broken_starts[points[next].data].items.push_back(intr);
                 broken_ends.push_back(prev == intr ? intr : points[intr].next);
                 points[intr].next = prev;
@@ -1123,10 +1151,10 @@ void follow_balance(
 
         Index real_next_next = points[next].next;
 
-        points[next].aux.desc.state = points[intr].aux.desc.state;
-        if(points[intr].aux.desc.state == line_state_t::discard) {
+        points[next].state() = points[intr].state();
+        if(points[intr].state() == line_state_t::discard) {
             if(pt) pt->point_merge(next,intr);
-        } else if(points[intr].aux.desc.state == line_state_t::keep_rev) {
+        } else if(points[intr].state() == line_state_t::keep_rev) {
             points[next].next = prev;
         }
 
@@ -1147,10 +1175,10 @@ template<typename Index> struct temp_polygon {
 
 } // namespace detail
 
-template<typename Index,typename Coord> class temp_polygon_proxy;
+template<typename Coord,typename Index=std::size_t> class temp_polygon_proxy;
 
-template<typename Index,typename Coord> class proto_loop_iterator {
-    friend temp_polygon_proxy<Index,Coord>;
+template<typename Coord,typename Index=std::size_t> class proto_loop_iterator {
+    friend temp_polygon_proxy<Coord,Index>;
 
     const detail::loop_point<Index,Coord> *lpoints;
     Index i;
@@ -1159,38 +1187,41 @@ template<typename Index,typename Coord> class proto_loop_iterator {
     value is used to distinguish the end from other iterators. */
     Index dist_from_end;
 
-    friend bool operator==(const proto_loop_iterator &a,const proto_loop_iterator &b) {
-        POLY_OPS_ASSERT(a.lpoints == b.lpoints);
+    friend bool operator==(const proto_loop_iterator &a,const proto_loop_iterator &b) noexcept {
+        assert(a.lpoints == b.lpoints);
         return a.dist_from_end == b.dist_from_end;
     }
 
-    friend bool operator==(const proto_loop_iterator &a,const std::default_sentinel_t&) {
-        return a.dist_from_end == 0;
-    }
-    friend bool operator==(const std::default_sentinel_t&,const proto_loop_iterator &b) {
-        return b.dist_from_end == 0;
+    friend std::ptrdiff_t operator-(const proto_loop_iterator &a,const proto_loop_iterator &b) noexcept {
+        assert(a.lpoints == b.lpoints);
+        return static_cast<std::ptrdiff_t>(b.dist_from_end) - static_cast<std::ptrdiff_t>(a.dist_from_end);
     }
 
-    proto_loop_iterator(const detail::loop_point<Index,Coord> *lpoints,Index i,Index dist_from_end)
+    proto_loop_iterator(const detail::loop_point<Index,Coord> *lpoints,Index i,Index dist_from_end) noexcept
         : lpoints(lpoints), i(i), dist_from_end(dist_from_end) {}
 
 public:
-    proto_loop_iterator &operator++() {
+    using value_type = point_t<Coord>;
+    
+    proto_loop_iterator &operator++() noexcept {
         i = lpoints[i].next;
         --dist_from_end;
         return *this;
     }
 
-    proto_loop_iterator operator++(int) {
+    proto_loop_iterator operator++(int) noexcept {
         return {lpoints,std::exchange(i,lpoints[i].next),dist_from_end--};
     }
 
-    const point_t<Coord> &operator*() const {
+    const point_t<Coord> &operator*() const noexcept {
         return lpoints[i].data;
     }
+
+    proto_loop_iterator() noexcept = default;
+    proto_loop_iterator(const proto_loop_iterator&) noexcept = default;
 };
 
-template<typename Index,typename Coord> class temp_polygon_proxy {
+template<typename Coord,typename Index> class temp_polygon_proxy {
     const detail::loop_point<Index,Coord> *lpoints;
     const detail::temp_polygon<Index> &data;
 public:
@@ -1199,13 +1230,15 @@ public:
         const detail::temp_polygon<Index> &data)
         : lpoints(lpoints), data(data) {}
 
-    proto_loop_iterator<Index,Coord> begin() const {
+    proto_loop_iterator<Coord,Index> begin() const noexcept {
         return {lpoints,data.loop_loc.start,data.loop_loc.size};
     }
 
-    std::default_sentinel_t end() const { return {}; }
+    proto_loop_iterator<Coord,Index> end() const noexcept {
+        return {lpoints,data.loop_loc.start,0};
+    }
 
-    Index size() const { return data.loop_loc.size; }
+    Index size() const noexcept { return data.loop_loc.size; }
 
     auto inner_loops() const {
         return data.children | std::views::transform(
@@ -1216,8 +1249,8 @@ public:
 };
 } // namespace poly_ops
 
-template<typename Index,typename Coord>
-inline constexpr bool std::ranges::enable_borrowed_range<poly_ops::temp_polygon_proxy<Index,Coord>> = true;
+template<typename Coord,typename Index>
+inline constexpr bool std::ranges::enable_borrowed_range<poly_ops::temp_polygon_proxy<Coord,Index>> = true;
 
 namespace poly_ops {
 namespace detail {
@@ -1349,7 +1382,7 @@ template<typename Index,typename Coord> auto make_temp_polygon_tree_range(
         | std::views::transform(
             [lpoints=std::move(lpoints),loops=std::move(loops)]
             (const temp_polygon<Index> *poly) {
-                return temp_polygon_proxy<Index,Coord>(lpoints.data(),*poly);
+                return temp_polygon_proxy<Coord,Index>(lpoints.data(),*poly);
             });
 }
 
@@ -1361,7 +1394,7 @@ template<typename Index,typename Coord> auto make_temp_polygon_tree_range(
     return std::ranges::owning_view(std::move(top))
         | std::views::transform(
             [&](const temp_polygon<Index> *poly) {
-                return temp_polygon_proxy<Index,Coord>(lpoints.data(),*poly);
+                return temp_polygon_proxy<Coord,Index>(lpoints.data(),*poly);
             });
 }
 
@@ -1373,7 +1406,7 @@ template<typename Index,typename Coord> auto make_temp_polygon_range(
         | std::views::transform(
             [lpoints=std::move(lpoints)]
             (const temp_polygon<Index> &poly) {
-                return temp_polygon_proxy<Index,Coord>(lpoints.data(),poly);
+                return temp_polygon_proxy<Coord,Index>(lpoints.data(),poly);
             });
 }
 
@@ -1383,34 +1416,44 @@ template<typename Index,typename Coord> auto make_temp_polygon_range(
 {
     return loops | std::views::transform(
             [&](const temp_polygon<Index> &poly) {
-                return temp_polygon_proxy<Index,Coord>(lpoints.data(),poly);
+                return temp_polygon_proxy<Coord,Index>(lpoints.data(),poly);
             });
 }
 
+template<typename T> concept sized_forward_range =
+    std::ranges::forward_range<T> && std::ranges::sized_range<T>;
+
 } // namespace detail
 
-template<typename Index,typename Coord>
+template<typename Coord,typename Index=std::size_t>
 using borrowed_temp_polygon_tree_range = decltype(
     detail::make_temp_polygon_tree_range<Index,Coord>(
         std::declval<const std::pmr::vector<detail::loop_point<Index,Coord>>&>(),
         std::declval<const std::pmr::vector<detail::temp_polygon<Index>>&>(),
         {}));
 
-template<typename Index,typename Coord>
+template<typename Coord,typename Index=std::size_t>
 using borrowed_temp_polygon_range = decltype(
     detail::make_temp_polygon_range<Index,Coord>(
         std::declval<const std::pmr::vector<detail::loop_point<Index,Coord>>&>(),
         std::declval<const std::pmr::vector<detail::temp_polygon<Index>>&>()));
 
-template<typename Index,typename Coord>
+template<typename Coord,typename Index=std::size_t>
 using temp_polygon_tree_range = decltype(
     detail::make_temp_polygon_tree_range<Index,Coord>({},{},{}));
 
-template<typename Index,typename Coord>
+template<typename Coord,typename Index=std::size_t>
 using temp_polygon_range = decltype(
     detail::make_temp_polygon_range<Index,Coord>({},{}));
 
-template<std::integral Index,coordinate Coord> class clipper {
+template<coordinate Coord,std::integral Index=std::size_t> class clipper {
+    static_assert(detail::sized_forward_range<temp_polygon_tree_range<Coord,Index>>
+        && detail::sized_forward_range<temp_polygon_range<Coord,Index>>
+        && detail::sized_forward_range<borrowed_temp_polygon_tree_range<Coord,Index>>
+        && detail::sized_forward_range<borrowed_temp_polygon_range<Coord,Index>>
+        && detail::sized_forward_range<temp_polygon_proxy<Coord,Index>>
+        && std::forward_iterator<proto_loop_iterator<Coord,Index>>);
+
     std::pmr::memory_resource *contig_mem;
     std::pmr::unsynchronized_pool_resource discrete_mem;
 
@@ -1442,6 +1485,7 @@ template<std::integral Index,coordinate Coord> class clipper {
         Index s1,
         Index s2);
     void add_fb_events(Index sa,Index sb);
+    void do_op(bool_op op);
 
 public:
     point_tracker<Index> *pt;
@@ -1452,17 +1496,17 @@ public:
         clipper &n;
         point_t<Coord> prev;
         Index first_i;
-        bool_cat cat;
+        bool_set cat;
         bool started;
 
-        point_sink(clipper &n,bool_cat cat) : n(n), cat(cat), started(false) {}
+        point_sink(clipper &n,bool_set cat) : n(n), cat(cat), started(false) {}
         point_sink(const point_sink&) = delete;
         point_sink(point_sink &&b) : n(b.n), prev(b.prev), first_i(b.first_i), started(b.started) {
             b.started = false;
         }
 
     public:
-        void operator()(const point_t<Coord> &p,Index orig_i);
+        void operator()(const point_t<Coord> &p,Index orig_i=0);
         Index last_orig_i() const { return n.original_i; }
         Index &last_orig_i() { return n.original_i; }
         ~point_sink();
@@ -1485,19 +1529,21 @@ public:
     {
         sweep_nodes.emplace_back();
     }
+
+    clipper(clipper &&b) = default;
     
     /* Important: you cannot pass the return value of "get_output()" from the
     same instance of "clipper" to this function. If you want to feed the
     results back into the same instance, make a copy of the data and pass the
     copy here. */
-    template<point_range<Coord> R> void add_loop(R &&loop,bool_cat cat);
+    template<point_range<Coord> R> void add_loop(R &&loop,bool_set cat);
 
     /* Important: you cannot pass the return value of "get_output()" from the
     same instance of "clipper" to this function. If you want to feed the
     results back into the same instance, make a copy of the data and pass the
     copy here. */
     template<point_range<Coord> R> void add_loop_subject(R &&loop) {
-        add_loop(std::forward<R>(loop),bool_cat::subject);
+        add_loop(std::forward<R>(loop),bool_set::subject);
     }
 
     /* Important: you cannot pass the return value of "get_output()" from the
@@ -1505,14 +1551,14 @@ public:
     results back into the same instance, make a copy of the data and pass the
     copy here. */
     template<point_range<Coord> R> void add_loop_clip(R &&loop) {
-        add_loop(std::forward<R>(loop),bool_cat::clip);
+        add_loop(std::forward<R>(loop),bool_set::clip);
     }
 
     /* Important: you cannot pass the return value of "get_output()" from the
     same instance of "clipper" to this function. If you want to feed the
     results back into the same instance, make a copy of the data and pass the
     copy here. */
-    template<point_range_range<Coord> R> void add_loops(R &&loops,bool_cat cat) {
+    template<point_range_range<Coord> R> void add_loops(R &&loops,bool_set cat) {
         for(auto &&loop : loops) add_loop(std::forward<decltype(loop)>(loop),cat);
     }
 
@@ -1521,7 +1567,7 @@ public:
     results back into the same instance, make a copy of the data and pass the
     copy here. */
     template<point_range_range<Coord> R> void add_loops_subject(R &&loops) {
-        add_loops(std::forward<R>(loops),bool_cat::subject);
+        add_loops(std::forward<R>(loops),bool_set::subject);
     }
 
     /* Important: you cannot pass the return value of "get_output()" from the
@@ -1529,7 +1575,7 @@ public:
     results back into the same instance, make a copy of the data and pass the
     copy here. */
     template<point_range_range<Coord> R> void add_loops_clip(R &&loops) {
-        add_loops(std::forward<R>(loops),bool_cat::clip);
+        add_loops(std::forward<R>(loops),bool_set::clip);
     }
 
     /* Return a "point sink".
@@ -1542,12 +1588,10 @@ public:
     Important: you cannot use the return value of "get_output()" from the same
     instance of "clipper" if this function is called. If you want to feed the
     results back into the same instance, make a copy of the data. */
-    point_sink add_loop(bool_cat cat) {
+    point_sink add_loop(bool_set cat) {
         if(ran) reset();
         return {*this,cat};
     }
-
-    void execute(bool_op op);
 
     /* Discard all loops added so far.
     
@@ -1555,41 +1599,54 @@ public:
     void reset();
 
     /* The output of this function has references to data in this instance of
-    "clipper". The returned range is invalidated when "reset()",
-    "add_loop()", or "add_loops()" is called or if the instance is destroyed. To
-    keep the data, make a copy. The data is also not sequential. */
+    "clipper". The returned range is invalidated when "reset()" is called,
+    polygons are added or if the instance is destroyed. To keep the data, make a
+    copy. The data is also not sequential. */
     template<bool TreeOut>
     std::conditional_t<TreeOut,
-        borrowed_temp_polygon_tree_range<Index,Coord>,
-        borrowed_temp_polygon_range<Index,Coord>>
-    get_output() &;
+        borrowed_temp_polygon_tree_range<Coord,Index>,
+        borrowed_temp_polygon_range<Coord,Index>>
+    execute(bool_op op) &;
 
     template<bool TreeOut>
     std::conditional_t<TreeOut,
-        temp_polygon_tree_range<Index,Coord>,
-        temp_polygon_range<Index,Coord>>
-    get_output() &&;
+        temp_polygon_tree_range<Coord,Index>,
+        temp_polygon_range<Coord,Index>>
+    execute(bool_op op) &&;
 };
 
-template<bool TreeOut,std::integral Index,coordinate Coord,point_range_range<Coord> Input>
+template<bool TreeOut,coordinate Coord,std::integral Index=std::size_t,point_range_range<Coord> Input>
 std::conditional_t<TreeOut,
-    temp_polygon_tree_range<Index,Coord>,
-    temp_polygon_range<Index,Coord>>
+    temp_polygon_tree_range<Coord,Index>,
+    temp_polygon_range<Coord,Index>>
 union_op(
     Input &&input,
     point_tracker<Index> *pt=nullptr,
     std::pmr::memory_resource *contig_mem=nullptr)
 {
-    clipper<Index,Coord> n{pt,contig_mem};
-    n.add_loops(std::forward<Input>(input),bool_cat::subject);
-    n.execute(bool_op::union_);
-    return std::move(n).template get_output<TreeOut>();
+    clipper<Coord,Index> n{pt,contig_mem};
+    n.add_loops(std::forward<Input>(input),bool_set::subject);
+    return std::move(n).template execute<TreeOut>(bool_op::union_);
 }
 
-template<bool TreeOut,std::integral Index,coordinate Coord,point_range_range<Coord> SInput,point_range_range<Coord> CInput>
+template<bool TreeOut,coordinate Coord,std::integral Index=std::size_t,point_range_range<Coord> Input>
 std::conditional_t<TreeOut,
-    temp_polygon_tree_range<Index,Coord>,
-    temp_polygon_range<Index,Coord>>
+    temp_polygon_tree_range<Coord,Index>,
+    temp_polygon_range<Coord,Index>>
+normalize(
+    Input &&input,
+    point_tracker<Index> *pt=nullptr,
+    std::pmr::memory_resource *contig_mem=nullptr)
+{
+    clipper<Coord,Index> n{pt,contig_mem};
+    n.add_loops(std::forward<Input>(input),bool_set::subject);
+    return std::move(n).template execute<TreeOut>(bool_op::normalize);
+}
+
+template<bool TreeOut,coordinate Coord,std::integral Index=std::size_t,point_range_range<Coord> SInput,point_range_range<Coord> CInput>
+std::conditional_t<TreeOut,
+    temp_polygon_tree_range<Coord,Index>,
+    temp_polygon_range<Coord,Index>>
 boolean_op(
     SInput &&subject,
     CInput &&clip,
@@ -1597,88 +1654,61 @@ boolean_op(
     point_tracker<Index> *pt=nullptr,
     std::pmr::memory_resource *contig_mem=nullptr)
 {
-    clipper<Index,Coord> n{pt,contig_mem};
-    n.add_loops(std::forward<SInput>(subject),bool_cat::subject);
-    n.add_loops(std::forward<CInput>(clip),bool_cat::clip);
-    n.execute(op);
-    return std::move(n).template get_output<TreeOut>();
+    clipper<Coord,Index> n{pt,contig_mem};
+    n.add_loops(std::forward<SInput>(subject),bool_set::subject);
+    n.add_loops(std::forward<CInput>(clip),bool_set::clip);
+    return std::move(n).template execute<TreeOut>(op);
 }
 
 
-template<std::integral Index,coordinate Coord>
+template<coordinate Coord,std::integral Index>
 template<point_range<Coord> R>
-void clipper<Index,Coord>::add_loop(R &&loop,bool_cat cat) {
-    if(ran) reset();
-
-    auto p_itr = std::ranges::begin(loop);
-    auto itr_end = std::ranges::end(loop);
-    if(p_itr == itr_end) return; // zero points
-
-    Index first_i = static_cast<Index>(lpoints.size());
-
-    point_t<Coord> prev = *p_itr++;
-    bool first=true;
-    for(point_t<Coord> p : std::ranges::subrange(p_itr,itr_end)) {
-        ++original_i;
-        if(first || prev != lpoints.back().data) {
-            lpoints.emplace_back(prev,static_cast<Index>(lpoints.size()+1),cat);
-            if(pt) pt->point_added(original_i);
-            first = false;
-        }
-        prev = p;
-    }
-    ++original_i;
-    if(first || (prev != lpoints.back().data && prev != lpoints[first_i].data)) {
-        lpoints.emplace_back(prev,0,cat);
-        if(pt) pt->point_added(original_i);
-    }
-    lpoints.back().next = first_i;
-    lpoints.back().aux.desc.state = detail::line_state_t::check;
+void clipper<Coord,Index>::add_loop(R &&loop,bool_set cat) {
+    auto sink = add_loop(cat);
+    for(point_t<Coord> p : loop) sink(p,original_i + 1);
 }
 
-template<std::integral Index,coordinate Coord>
-void clipper<Index,Coord>::point_sink::operator()(const point_t<Coord> &p,Index orig_i) {
+template<coordinate Coord,std::integral Index>
+void clipper<Coord,Index>::point_sink::operator()(const point_t<Coord> &p,Index orig_i) {
     if(started) {
-        if(prev != n.lpoints.back().data) {
-            n.lpoints.emplace_back(prev,static_cast<Index>(n.lpoints.size()+1),cat);
-            if(n.pt) n.pt->point_added(n.original_i);
-        }
-        prev = p;
+        if(prev == n.lpoints.back().data) goto skip;
     } else {
         prev = p;
         first_i = static_cast<Index>(n.lpoints.size());
-
-        /* Normally points aren't added until this is called with the next point
-        or the destructor is called, but duplicate points aren't added anyway
-        and adding it now means the "prev != n.lpoints.back().data" checks above
-        and in the destructor are always safe. */
-        n.lpoints.emplace_back(prev,static_cast<Index>(n.lpoints.size())+1,cat);
-        if(n.pt) n.pt->point_added(n.original_i);
-
-        started = true;
     }
+
+    /* Normally, points aren't added until this is called with the next point or
+    the destructor is called, but duplicate points aren't added anyway and
+    adding it on the first call means the "prev != n.lpoints.back().data" checks
+    above and in the destructor are always safe. */
+    n.lpoints.emplace_back(prev,static_cast<Index>(n.lpoints.size())+1,cat);
+    if(n.pt) n.pt->point_added(n.original_i);
+
+    started = true;
+skip:
+    prev = p;
     n.original_i = orig_i;
 }
-template<std::integral Index,coordinate Coord>
-clipper<Index,Coord>::point_sink::~point_sink() {
+template<coordinate Coord,std::integral Index>
+clipper<Coord,Index>::point_sink::~point_sink() {
     if(started) {
         if(prev != n.lpoints.back().data && prev != n.lpoints[first_i].data) {
             n.lpoints.emplace_back(prev,0,cat);
             if(n.pt) n.pt->point_added(n.original_i);
         }
         n.lpoints.back().next = first_i;
-        n.lpoints.back().aux.desc.state = detail::line_state_t::check;
+        n.lpoints.back().state() = detail::line_state_t::check;
     }
 }
 
-template<std::integral Index,coordinate Coord>
-void clipper<Index,Coord>::add_fb_events(Index sa,Index sb) {
+template<coordinate Coord,std::integral Index>
+void clipper<Coord,Index>::add_fb_events(Index sa,Index sb) {
     events.add_fb_events(lpoints,sa,sb,static_cast<Index>(sweep_nodes.size()));
     sweep_nodes.emplace_back(detail::cached_segment<Index,Coord>(sa,sb,lpoints));
 }
 
-template<std::integral Index,coordinate Coord>
-Index clipper<Index,Coord>::split_segment(
+template<coordinate Coord,std::integral Index>
+Index clipper<Coord,Index>::split_segment(
     detail::sweep_t<Index,Coord> &sweep,
     Index s,
     const point_t<Coord> &c,
@@ -1705,8 +1735,8 @@ Index clipper<Index,Coord>::split_segment(
 
     Index mid = lpoints.size();
     lpoints[sa].next = mid;
-    lpoints.emplace_back(c,sb,lpoints[sa].aux.desc.cat);
-    POLY_OPS_ASSERT(lpoints[sa].aux.desc.cat == lpoints[sb].aux.desc.cat);
+    lpoints.emplace_back(c,sb,lpoints[sa].bset());
+    POLY_OPS_ASSERT(lpoints[sa].bset() == lpoints[sb].bset());
     POLY_OPS_ASSERT_SLOW(check_integrity(lpoints,sweep));
 
     /* even if the original line was not vertical, one of the new lines might
@@ -1725,8 +1755,8 @@ Index clipper<Index,Coord>::split_segment(
     return mid;
 }
 
-template<std::integral Index,coordinate Coord>
-bool clipper<Index,Coord>::check_intersection(
+template<coordinate Coord,std::integral Index>
+bool clipper<Coord,Index>::check_intersection(
     detail::sweep_t<Index,Coord> &sweep,
     Index s1,
     Index s2)
@@ -1744,16 +1774,16 @@ bool clipper<Index,Coord>::check_intersection(
 
             if(pt) pt->new_intersection(intr1,intr2);
 
-            lpoints[intr1].aux.desc.state = line_state_t::check;
-            lpoints[intr2].aux.desc.state = line_state_t::check;
+            lpoints[intr1].state() = line_state_t::check;
+            lpoints[intr2].state() = line_state_t::check;
 
             return true;
         } else {
             intr1 = at_edge[0] == at_edge_t::start ? sweep_nodes[s1].value.a : sweep_nodes[s1].value.b;
             intr2 = at_edge[1] == at_edge_t::start ? sweep_nodes[s2].value.a : sweep_nodes[s2].value.b;
 
-            lpoints[intr1].aux.desc.state = line_state_t::check;
-            lpoints[intr2].aux.desc.state = line_state_t::check;
+            lpoints[intr1].state() = line_state_t::check;
+            lpoints[intr2].state() = line_state_t::check;
         }
     }
 
@@ -1762,13 +1792,13 @@ bool clipper<Index,Coord>::check_intersection(
 
 /* This is a modified version of the Bentley–Ottmann algorithm. Lines are broken
 at intersections. */
-template<std::integral Index,coordinate Coord>
-void clipper<Index,Coord>::self_intersection() {
+template<coordinate Coord,std::integral Index>
+void clipper<Coord,Index>::self_intersection() {
     using namespace detail;
 
     events.reserve(lpoints.size()*2 + 10);
 
-    for(Index i=0; i<lpoints.size(); ++i) {
+    for(Index i=0; i<static_cast<Index>(lpoints.size()); ++i) {
         Index j1 = i;
         Index j2 = lpoints[i].next;
 
@@ -1845,20 +1875,20 @@ void clipper<Index,Coord>::self_intersection() {
     }
 }
 
-template<std::integral Index,coordinate Coord>
-void clipper<Index,Coord>::calc_line_bal(bool_op op) {
+template<coordinate Coord,std::integral Index>
+void clipper<Coord,Index>::calc_line_bal(bool_op op) {
     using namespace detail;
 
     line_bal_sweep_t<Index,Coord> sweep(sweep_nodes);
 
     auto scan = [&,this](Index i) {
-        if(lpoints[i].aux.desc.state == line_state_t::check) {
+        if(lpoints[i].state() == line_state_t::check) {
             samples.emplace_back(i,std::pmr::vector<Index>(contig_mem));
             line_balance<Index,Coord> lb{lpoints.data(),i,samples.back().hits};
             for(const sweep_node<Index,Coord> &s : sweep) lb.check(s.value);
             for(segment<Index> s : events.touching_removed(lpoints)) lb.check(s);
             for(segment<Index> s : events.touching_pending(lpoints)) lb.check(s);
-            lpoints[i].aux.desc.state = lb.result(op);
+            lpoints[i].state() = lb.result(op);
 
             POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_SAMPLE
         }
@@ -1889,8 +1919,8 @@ void clipper<Index,Coord>::calc_line_bal(bool_op op) {
     }
 }
 
-template<std::integral Index,coordinate Coord>
-void clipper<Index,Coord>::execute(bool_op op) {
+template<coordinate Coord,std::integral Index>
+void clipper<Coord,Index>::do_op(bool_op op) {
     POLY_OPS_ASSERT(!ran);
 
     ran = true;
@@ -1957,13 +1987,15 @@ void clipper<Index,Coord>::execute(bool_op op) {
     find_loops<Index,Coord>(lpoints,loops_out,contig_mem);
 }
 
-template<std::integral Index,coordinate Coord>
+template<coordinate Coord,std::integral Index>
 template<bool TreeOut>
 std::conditional_t<TreeOut,
-    borrowed_temp_polygon_tree_range<Index,Coord>,
-    borrowed_temp_polygon_range<Index,Coord>>
-clipper<Index,Coord>::get_output() & {
-    POLY_OPS_ASSERT(ran);
+    borrowed_temp_polygon_tree_range<Coord,Index>,
+    borrowed_temp_polygon_range<Coord,Index>>
+clipper<Coord,Index>::execute(bool_op op) & {
+    if(ran) reset();
+
+    do_op(op);
 
     if constexpr(TreeOut) {
         auto top = loop_hierarchy(lpoints,loops_out,samples,contig_mem);
@@ -1976,13 +2008,15 @@ clipper<Index,Coord>::get_output() & {
     }
 }
 
-template<std::integral Index,coordinate Coord>
+template<coordinate Coord,std::integral Index>
 template<bool TreeOut>
 std::conditional_t<TreeOut,
-    temp_polygon_tree_range<Index,Coord>,
-    temp_polygon_range<Index,Coord>>
-clipper<Index,Coord>::get_output() && {
-    POLY_OPS_ASSERT(ran);
+    temp_polygon_tree_range<Coord,Index>,
+    temp_polygon_range<Coord,Index>>
+clipper<Coord,Index>::execute(bool_op op) && {
+    if(ran) reset();
+
+    do_op(op);
 
     if constexpr(TreeOut) {
         auto top = loop_hierarchy(lpoints,loops_out,samples,contig_mem);
@@ -1997,8 +2031,8 @@ clipper<Index,Coord>::get_output() && {
     }
 }
 
-template<std::integral Index,coordinate Coord>
-void clipper<Index,Coord>::reset() {
+template<coordinate Coord,std::integral Index>
+void clipper<Coord,Index>::reset() {
     lpoints.clear();
     samples.clear();
     sweep_nodes.resize(1);

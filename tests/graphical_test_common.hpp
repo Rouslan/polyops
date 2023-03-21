@@ -57,7 +57,7 @@
 }
 
 #define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_SAMPLE if(graphical_debug) { \
-    report_hits(i,samples.back().hits,lb.result()); \
+    report_hits(i,samples.back().hits,lpoints[i].state()); \
     auto out = mc__->console_line_stream(); \
     out << "sweep: " << delimited(sweep | std::views::transform([](auto &n){ return n.value; })); \
     out << "\nbefore: " << delimited(events.touching_removed(lpoints)); \
@@ -110,6 +110,7 @@ namespace poly_ops::detail {
 template<typename Index> struct event;
 template<typename Index,typename Coord> struct loop_point;
 template<typename Index> struct segment;
+enum class line_state_t;
 }
 template<typename Sweep> void delegate_drawing(
     const std::pmr::vector<poly_ops::detail::loop_point<index_t,coord_t>> &lpoints,
@@ -130,7 +131,7 @@ template<typename T> _pp<T> pp(T &&x,unsigned int indent);
 template<typename T> struct delimited_t;
 template<typename R> delimited_t<R> delimited(R &&items);
 
-void report_hits(index_t index,const std::pmr::vector<index_t> &hits,int balance);
+void report_hits(index_t index,const std::pmr::vector<index_t> &hits,poly_ops::detail::line_state_t state);
 void report_missed_intr(poly_ops::detail::segment<index_t> s1,poly_ops::detail::segment<index_t> s2);
 
 #include "../include/poly_ops/poly_ops.hpp"
@@ -195,6 +196,17 @@ namespace poly_ops {
                 attr("deleted") = x.status == event_status_t::deleted,
                 attr("type") = static_cast<int>(x.type) - static_cast<int>(event_type_t::vforward));
         }
+
+        std::string_view to_json_value(line_state_t state) {
+            switch(state) {
+            case line_state_t::undef: return "undef";
+            case line_state_t::check: return "check";
+            case line_state_t::discard: return "discard";
+            case line_state_t::keep: return "keep";
+            case line_state_t::keep_rev: return "keep_rev";
+            }
+            return "[error]";
+        }
     }
 }
 
@@ -218,13 +230,13 @@ template<typename Sweep,typename Events> void emit_forward_backward(
         attr("events") = array_range(events)));
 }
 
-void report_hits(index_t index,const std::pmr::vector<index_t> &hits,int balance) {
+void report_hits(index_t index,const std::pmr::vector<index_t> &hits,poly_ops::detail::line_state_t state) {
     using namespace json;
     mc__->message(obj(
         attr("command") = "linebalance",
         attr("point") = index,
         attr("hits") = array_range(hits),
-        attr("balance") = balance));
+        attr("state") = state));
 }
 
 void report_missed_intr(detail::segment<index_t> s1,detail::segment<index_t> s2) {
@@ -237,7 +249,7 @@ void report_missed_intr(detail::segment<index_t> s1,detail::segment<index_t> s2)
 struct draw_point {
     point_t<coord_t> data;
     index_t next;
-    enum state {NORMAL=0,SWEEP,INVERTED,NESTED,TO_ORIGINAL} type;
+    enum state {NORMAL=0,SWEEP,REVERSE,DISCARD,TO_ORIGINAL} type;
 };
 
 auto to_json_value(const draw_point &p) {
@@ -311,10 +323,8 @@ template<typename Sweep> void delegate_drawing(
         if(sweep.count(detail::cached_segment<index_t,coord_t>(index_t(i),lpoints[i].next,lpoints))
                 || sweep.count(detail::cached_segment<index_t,coord_t>(lpoints[i].next,index_t(i),lpoints))) {
             state = draw_point::SWEEP;
-        } else if(lpoints[i].line_bal != detail::UNDEF_LINE_BAL) {
-            if(lpoints[i].line_bal < 0) state = draw_point::INVERTED;
-            else if(lpoints[i].line_bal > 0) state = draw_point::NESTED;
-        }
+        } else if(lpoints[i].state() == detail::line_state_t::keep_rev) state = draw_point::REVERSE;
+        else if(lpoints[i].state() == detail::line_state_t::discard) state = draw_point::DISCARD;
 
         draw_lines[i] = {lpoints[i].data,lpoints[i].next,state};
     }
@@ -356,8 +366,8 @@ void delegate_drawing_trimmed(
     draw_lines.resize(lpoints.size());
     for(size_t i=0; i<lpoints.size(); ++i) {
         draw_point::state state = draw_point::NORMAL;
-        if(lpoints[i].line_bal < 0) state = draw_point::INVERTED;
-        else if(lpoints[i].line_bal > 0) state = draw_point::NESTED;
+        if(lpoints[i].state() == detail::line_state_t::keep_rev) state = draw_point::REVERSE;
+        else if(lpoints[i].state() == detail::line_state_t::discard) state = draw_point::DISCARD;
         /*else {
             for(index_t orig : original_sets[lpoints[i].original_set]) {
                 const coord_t *op = input_coords[orig];

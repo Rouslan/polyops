@@ -66,7 +66,8 @@ struct scene {
     std::vector<satellite> shapes;
     loops_t center_shape;
     std::vector<std::vector<SDL_FPoint>> line_buffer;
-    poly_ops::clipper<index_t,coord_t> clip;
+    poly_ops::clipper<coord_t,index_t> clip;
+    poly_ops::bool_op operation = poly_ops::bool_op::union_;
 
     void update(double delta) {
         line_buffer.clear();
@@ -85,9 +86,7 @@ struct scene {
             clip.add_loop_clip(loop | std::views::transform([=](auto &p) { return p + poly_ops::point_t<coord_t>(3000,3000); }));
         }
 
-        clip.execute(poly_ops::bool_op::difference);
-
-        auto loops = clip.get_output<false>();
+        auto loops = clip.execute<false>(operation);
 
         for(auto &&loop : loops) {
             assert(loop.size());
@@ -259,6 +258,14 @@ int main(int,char**) {
     for(;;) {
         while(SDL_PollEvent(&event)) {
             switch(event.type) {
+            case SDL_KEYDOWN:
+                if(event.key.keysym.sym == SDLK_SPACE) {
+                    int o = static_cast<int>(sc.operation) + 1;
+                    if(o > static_cast<int>(poly_ops::bool_op::difference))
+                        o = static_cast<int>(poly_ops::bool_op::union_);
+                    sc.operation = static_cast<poly_ops::bool_op>(o);
+                }
+                break;
             case SDL_WINDOWEVENT:
                 if(event.window.windowID == window_id) {
                     switch(event.window.event) {

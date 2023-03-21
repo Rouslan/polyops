@@ -16,7 +16,7 @@
 
 constexpr size_t DEFAULT_LOOP_SIZE = 5;
 
-enum class op_type {unset,normalize,offset};
+enum class op_type {unset,normalize,offset,union_};
 struct settings_t {
     op_type operation;
     long loop_size;
@@ -39,7 +39,9 @@ void random_loop(std::mt19937 &rand_gen,std::vector<point_t<coord_t>> &loop,inde
 
 void do_one(op_type type,std::span<const std::vector<point_t<coord_t>>> loops) {
     if(type == op_type::normalize) {
-        union_op<false,index_t,coord_t>(loops);
+        normalize<false,coord_t,index_t>(loops);
+    } else if(type == op_type::union_) {
+        union_op<false,coord_t,index_t>(loops);
     } else {
         if(mc__) {
             mc__->message(json::obj(
@@ -47,7 +49,7 @@ void do_one(op_type type,std::span<const std::vector<point_t<coord_t>>> loops) {
                 json::attr("points") = json::array_range(loops[0] | std::views::join)));
         }
 
-        offset<false,index_t,coord_t>(loops,50,40);
+        offset<false,coord_t,index_t>(loops,50,40);
     }
 }
 
@@ -89,8 +91,8 @@ OPTIONS:
     Start in interactive mode without first checking if the input fails.
 
 -o OPERATION
-    Operation to perform. This can be either "normalize" or "offset". The
-    default is "offset".
+    Operation to perform. This can be either "normalize", "offset" or "union".
+    The default is "offset".
 
 -p INTEGER
     A positive integer specifying how many points to generate for random tests.
@@ -175,6 +177,10 @@ bool handle_operation_val(settings_t &settings,char **(&argv),char **end) {
     }
     if(strcmp(val,"offset") == 0) {
         settings.operation = op_type::offset;
+        return true;
+    }
+    if(strcmp(val,"union") == 0) {
+        settings.operation = op_type::union_;
         return true;
     }
 

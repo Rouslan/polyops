@@ -18,5 +18,5 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Scientific/Engineering :: Mathematics"]
-dependencies = ['numpy']
+dependencies = ["numpy"]
 dynamic = ["version"]

@@ -2,7 +2,7 @@
 #define poly_ops_poly_ops_hpp
 
 #include "base.hpp"
-#include "normalize.hpp"
+#include "clip.hpp"
 #include "offset.hpp"
 #include "strided_itr.hpp"
 

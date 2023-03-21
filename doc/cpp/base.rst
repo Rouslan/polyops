@@ -14,7 +14,7 @@ Concepts
     .. code-block:: cpp
 
         detail::arithmetic<T>
-        && detail::arithmetic<typename coord_ops<T>::long_t>
+        && detail::arithmetic<long_coord_t<T>>
         && detail::arithmetic<real_coord_t<T>>
         && detail::arithmetic_promotes<T,long_coord_t<T>>
         && detail::arithmetic_promotes<T,real_coord_t<T>>
@@ -22,6 +22,7 @@ Concepts
         && std::totally_ordered<long_coord_t<T>>
         && std::totally_ordered<real_coord_t<T>>
         && std::convertible_to<T,long_coord_t<T>>
+        && std::convertible_to<int,long_coord_t<T>>
         && std::convertible_to<T,real_coord_t<T>>
         && requires(T c,long_coord_t<T> cl,real_coord_t<T> cr) {
             static_cast<long>(c);
@@ -36,6 +37,11 @@ Concepts
             { coord_ops<T>::floor(cr) } -> std::same_as<T>;
             { coord_ops<T>::to_coord(cr) } -> std::same_as<T>;
             { coord_ops<T>::pi() } -> std::same_as<real_coord_t<T>>;
+            { coord_ops<T>::mul(c,c) } -> std::same_as<long_coord_t<T>>;
+            { cr * cr } -> std::same_as<real_coord_t<T>>;
+            { cr / cr } -> std::same_as<real_coord_t<T>>;
+            { c * cr } -> std::same_as<real_coord_t<T>>;
+            { cr * c } -> std::same_as<real_coord_t<T>>;
         }
 
     where ``detail::arithmetic<typename T>`` is:
@@ -45,8 +51,6 @@ Concepts
         requires(T x) {
             { x + x } -> std::same_as<T>;
             { x - x } -> std::same_as<T>;
-            { x * x } -> std::same_as<T>;
-            { x / x } -> std::same_as<T>;
             { -x } -> std::same_as<T>;
         }
 
@@ -59,10 +63,6 @@ Concepts
             { b + a } -> std::same_as<Greater>;
             { a - b } -> std::same_as<Greater>;
             { b - a } -> std::same_as<Greater>;
-            { a * b } -> std::same_as<Greater>;
-            { b * a } -> std::same_as<Greater>;
-            { a / b } -> std::same_as<Greater>;
-            { b / a } -> std::same_as<Greater>;
         }
 
 .. cpp:concept:: template<typename T,typename Coord> point
@@ -93,8 +93,11 @@ Concepts
         std::ranges::sized_range<T> && point_range<std::ranges::range_value_t<T>,Coord>
 
 
-Classes/Structs
+Types
 ------------------
+
+.. cpp:type:: template<typename Coord> long_coord_t = typename coord_ops<Coord>::long_t;
+.. cpp:type:: template<typename Coord> real_coord_t = typename coord_ops<Coord>::real_t;
 
 .. cpp:struct:: template<typename T> point_ops
 
@@ -124,9 +127,32 @@ Classes/Structs
     `Coord` and `long_t` should return `long_t`, `long_t` and `real_t` should
     return `real_t`, and `Coord` and `real_t` should return `real_t`.
 
-    .. cpp:type:: long long_t
+    .. cpp:type:: long_t
 
-    .. cpp:type:: double real_t
+        Certain operations require double the bits of the maximum coordinate
+        value to avoid overflow.
+
+        By default, if the target is a 64-bit platforms and `Coord` is a 64 bit
+        type, this is :cpp:class:`basic_int128`. On other platforms if `Coord`
+        is not smaller than `long`, this is `long long`. Otherwise this is
+        `long`.
+        
+        This can be specialized as a user-defined type.
+
+    .. cpp:type:: real_t = double
+
+        The coordinates of generated points are usually real numbers. By
+        default, they are represented by `double` before being rounded back to
+        integers. This type can be specialized to use `float` instead, or some
+        user-defined type for more precision.
+    
+    .. cpp:function:: static long_t mul(Coord a,Coord b)
+
+        Multiply `a` and `b` and return the result.
+
+        This should be equivalent to
+        ``static_cast<long_t>(a) * static_cast<long_t>(b)``, except `long_t` is
+        not required to support multiplication.
 
     .. cpp:function:: static real_t acos(Coord x)
 
@@ -359,5 +385,4 @@ Functions
     zero if degenerate or exactly half of the polygon's area is inverted.
 
     This algorithm works on any polygon. For non-overlapping non-inverting
-    polygons, more efficient methods exist. The magnitude of the return value is
-    two times the area of the polygon.
+    polygons, more efficient methods exist.

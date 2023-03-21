@@ -3,6 +3,10 @@ poly_ops/clipper.hpp
 
 .. cpp:namespace:: poly_ops
 
+
+Types
+------------------
+
 .. cpp:class:: template<typename Index> point_tracker
 
     Point tracking common interface.
@@ -58,31 +62,48 @@ poly_ops/clipper.hpp
 
 .. cpp:enum-class:: bool_op
 
+    Given two sets of polygons, `subject` and `clip`, specifies which operation
+    to perform.
+
     .. cpp::enumerator:: union_
 
-        pi
+        boolean operation `subject` OR `clip`.
 
     .. cpp::enumerator:: intersection
 
+        boolean operation `subject` AND `clip`.
+
     .. cpp::enumerator:: xor_
+
+        boolean operation `subject` XOR `clip`.
 
     .. cpp::enumerator:: difference
 
+        boolean operation `subject` AND NOT `clip`.
+    
+    .. cpp:enumerator:: normalize
 
-.. cpp:enum-class:: bool_cat
+        Keep all lines but make it so all outer lines are clockwise polygons,
+        all singly nested lines are counter-clockwise polygons, all
+        doubly-nested polygons are clockwise polygons, and so forth.
+
+
+.. cpp:enum-class:: bool_set
+
+    Specifies one of two sets.
 
     .. cpp::enumerator:: subject
 
     .. cpp::enumerator:: clip
 
 
-.. cpp:type:: template<typename Index,typename Coord> proto_loop_iterator
+.. cpp:type:: template<typename Coord,typename Index=std::size_t> proto_loop_iterator
 
     An opaque type that models `std::forward_iterator`. The iterator yields
     instances of `point_t<Coord>`.
 
 
-.. cpp:class:: template<typename Index,typename Coord> temp_polygon_proxy
+.. cpp:class:: template<typename Coord,typename Index=std::size_t> temp_polygon_proxy
 
     A representation of a polygon with zero or more child polygons.
 
@@ -90,11 +111,11 @@ poly_ops/clipper.hpp
     library. This class models `std::ranges::forward_range` and
     `std::ranges::sized_range` and yields instances of `point<Coord>`.
 
-    .. cpp:function:: proto_loop_iterator<Index,Coord> begin() const
+    .. cpp:function:: proto_loop_iterator<Coord<Index>> begin() const
 
         Get the iterator to the first element.
 
-    .. cpp:function:: std::default_sentinel_t end() const
+    .. cpp:function:: proto_loop_iterator<Coord,Index> end() const
 
         Get the end iterator
 
@@ -104,39 +125,39 @@ poly_ops/clipper.hpp
 
     .. cpp:function:: auto inner_loops() const
 
-        Return a range of `temp_polygon_proxy<Index,Coord>` instances
+        Return a range of `temp_polygon_proxy<Coord,Index>` instances
         representing the children of this polygon.
 
 
-.. cpp:type:: template<typename Index,typename Coord>\
+.. cpp:type:: template<typename Coord,typename Index=std::size_t>\
         borrowed_temp_polygon_tree_range
 
     An opaque type that models `std::ranges::forward_range` and
     `std::ranges::sized_range`.
 
 
-.. cpp:type:: template<typename Index,typename Coord>\
+.. cpp:type:: template<typename Coord,typename Index=std::size_t>\
         borrowed_temp_polygon_range
 
     An opaque type that models `std::ranges::forward_range` and
     `std::ranges::sized_range`.
 
 
-.. cpp:type:: template<typename Index,typename Coord>\
+.. cpp:type:: template<typename Coord,typename Index=std::size_t>\
         temp_polygon_tree_range
 
     An opaque type that models `std::ranges::forward_range` and
     `std::ranges::sized_range`.
 
 
-.. cpp:type:: template<typename Index,typename Coord>\
+.. cpp:type:: template<typename Coord,typename Index=std::size_t>\
         temp_polygon_range
 
     An opaque type that models `std::ranges::forward_range` and
     `std::ranges::sized_range`.
 
 
-.. cpp:class:: template<std::integral Index,coordinate Coord> clipper
+.. cpp:class:: template<coordinate Coord,std::integral Index=std::size_t> clipper
 
     A class for performing boolean clipping operations.
 
@@ -158,97 +179,102 @@ poly_ops/clipper.hpp
             point_tracker<Index> *pt=nullptr,\
             std::pmr::memory_resource *_contig_mem=nullptr)
 
-    .. cpp:function:: template<point_range<Coord> R> void add_loop(R &&loop,bool_cat cat)
+    .. cpp:function:: template<point_range<Coord> R> void add_loop(R &&loop,bool_set cat)
 
-        .. important::
+        Add an input polygon.
 
-            You cannot pass the return value of :cpp:func:`get_output` from the
-            same instance of `clipper` to this function. If you want to feed the
-            results back into the same instance, make a copy of the data.
+        The output returned by :cpp:func:`execute` is invalidated.
 
     .. cpp:function:: template<point_range<Coord> R> void add_loop_subject(R &&loop)
 
-        .. important::
+        Add an input *subject* polygon.
 
-            You cannot pass the return value of :cpp:func:`get_output` from the
-            same instance of `clipper` to this function. If you want to feed the
-            results back into the same instance, make a copy of the data.
+        The output returned by :cpp:func:`execute` is invalidated.
 
     .. cpp:function:: template<point_range<Coord> R> void add_loop_clip(R &&loop)
 
-        .. important::
+        Add an input *clip* polygon.
 
-            You cannot pass the return value of :cpp:func:`get_output` from the
-            same instance of `clipper` to this function. If you want to feed the
-            results back into the same instance, make a copy of the data.
+        The output returned by :cpp:func:`execute` is invalidated.
 
-    .. cpp:function:: template<point_range_range<Coord> R> void add_loops(R &&loops,bool_cat cat)
+    .. cpp:function:: template<point_range_range<Coord> R> void add_loops(R &&loops,bool_set cat)
 
-        .. important::
+        Add input polygons.
 
-            You cannot pass the return value of :cpp:func:`get_output` from the
-            same instance of `clipper` to this function. If you want to feed the
-            results back into the same instance, make a copy of the data.
+        The output returned by :cpp:func:`execute` is invalidated.
 
     .. cpp:function:: template<point_range_range<Coord> R> void add_loops_subject(R &&loops)
 
-        .. important::
+        Add input *subject* polygons.
 
-            You cannot pass the return value of :cpp:func:`get_output` from the
-            same instance of `clipper` to this function. If you want to feed the
-            results back into the same instance, make a copy of the data.
+        The output returned by :cpp:func:`execute` is invalidated.
 
     .. cpp:function:: template<point_range_range<Coord> R> void add_loops_clip(R &&loops)
 
-        .. important::
+        Add input *clip* polygons.
 
-            You cannot pass the return value of :cpp:func:`get_output` from the
-            same instance of `clipper` to this function. If you want to feed the
-            results back into the same instance, make a copy of the data.
+        The output returned by :cpp:func:`execute` is invalidated.
 
-    .. cpp:function:: point_sink add_loop(bool_cat cat)
+    .. cpp:function:: point_sink add_loop(bool_set cat)
 
         Return a "point sink".
 
         This is an alternative to adding loops with ranges. The return value is
         a functor that allows adding one point at a time. The destructor of the
-        return value must be called before any other method of this instance of
-        `clipper` is called.
+        return value must be called before any method of this instance of
+        `clipper` is called afterwards.
 
-        .. important::
-
-            You cannot use the return value of :cpp:func:`get_output` from the
-            same instance of `clipper` if this function is called. If you want
-            to feed the results back into the same instance, make a copy of the
-            data.
-
-    .. cpp:function:: void execute(bool_op op)
+        The output returned by :cpp:func:`execute` is invalidated.
 
     .. cpp:function:: void reset()
 
-        Discard all loops added so far.
+        Discard all polygons added so far.
 
-        The output returned by :cpp:func:`get_output` is invalidated.
-
-    .. cpp:function:: template<bool TreeOut>\
-        std::conditional_t<TreeOut,\
-            borrowed_temp_polygon_tree_range<Index,Coord>,\
-            borrowed_temp_polygon_range<Index,Coord>>\
-        get_output() &
-
-        The output of this function has references to data in this instance of
-        `clipper`. The returned range is invalidated when :cpp:func:`reset`,
-        :cpp:func:`add_loop`, or :cpp:func:`add_loops` is called or if the instance is destroyed. To
-        keep the data, make a copy. The data is also not sequential.
+        The output returned by :cpp:func:`execute` is invalidated.
 
     .. cpp:function:: template<bool TreeOut>\
         std::conditional_t<TreeOut,\
-            temp_polygon_tree_range<Index,Coord>,\
-            temp_polygon_range<Index,Coord>>\
-        get_output() &&
+            borrowed_temp_polygon_tree_range<Coord,Index>,\
+            borrowed_temp_polygon_range<Coord,Index>>\
+        execute(bool_op op) &
+
+        Perform a boolean operation and return the result.
+
+        After calling this function, all the input is consumed. To perform
+        another operation, polygons must be added again.
+
+        .. important::
+
+            The output of this function has references to data in this instance
+            of `clipper`. The returned range is invalidated if the instance is
+            destroyed or when any of the following are called:
+            
+                - :cpp:func:`reset`,
+                - :cpp:func:`add_loop`
+                - :cpp:func:`add_loop_subject`
+                - :cpp:func:`add_loop_clip`
+                - :cpp:func:`add_loops`
+                - :cpp:func:`add_loops_subject`
+                - :cpp:func:`add_loops_clip`
+                - `execute()` (if called a second time)
+            
+            This means the return value cannot be fed directly back into the
+            same instance of `clipper`. To keep the data, make a copy. The data
+            is also not stored sequentially in memory.
+
+    .. cpp:function:: template<bool TreeOut>\
+        std::conditional_t<TreeOut,\
+            temp_polygon_tree_range<Coord,Index>,\
+            temp_polygon_range<Coord,Index>>\
+        execute(bool_op op) &&
+
+        Perform a boolean operation and return the result.
 
 
-.. cpp:function:: template<bool TreeOut,std::integral Index,coordinate Coord,point_range_range<Coord> Input>\
+Functions
+----------------
+
+.. cpp:function:: template<bool TreeOut,coordinate Coord,std::integral Index=std::size_t,point_range_range<Coord> Input>\
     std::conditional_t<TreeOut,\
         temp_polygon_tree_range<Index,Coord>,\
         temp_polygon_range<Index,Coord>>\
@@ -263,7 +289,7 @@ poly_ops/clipper.hpp
     passed to `clip` and :cpp:enumerator:`bool_op::union_` passed to `op`.
 
 
-.. cpp:function:: template<bool TreeOut,std::integral Index,coordinate Coord,point_range_range<Coord> SInput,point_range_range<Coord> CInput>\
+.. cpp:function:: template<bool TreeOut,coordinate Coord,std::integral Index=std::size_t,point_range_range<Coord> SInput,point_range_range<Coord> CInput>\
     std::conditional_t<TreeOut,\
         temp_polygon_tree_range<Index,Coord>,\
         temp_polygon_range<Index,Coord>>\

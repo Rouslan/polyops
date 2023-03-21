@@ -32,3 +32,4 @@ target_include_directories(poly_ops PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 add_subdirectory(tests)
 add_subdirectory(example)
+add_subdirectory(doc)

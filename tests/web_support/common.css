@@ -145,9 +145,9 @@ polyline, polygon {
 .showvlabel .vlabel {
     display: unset;
 }
-svg .sweep { stroke: #ff9999; }
-svg .inverted, svg .sweepline { stroke: green; }
-svg .nested { stroke: blue; }
-svg .tooriginal { stroke: grey; }
+svg .s_sweep { stroke: #ff9999; }
+svg .s_reverse, svg .sweepline { stroke: green; }
+svg .s_discard { stroke: blue; }
+svg .s_tooriginal { stroke: grey; }
 svg .original { stroke: purple; }
 svg polyline .lbhit { stroke: orange; }

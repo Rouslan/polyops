@@ -8,25 +8,43 @@
 #include <span>
 #include <ranges>
 
+#include "int128.hpp"
+
 
 namespace poly_ops {
 
 /** Mathematical operations on coordinate types. This struct can be specialized
-by users of this library. Arithmetic operators should be defined for every
-permutation of Coord, long_t and real_t. Binary operations with Coord and long_t
-should return long_t, long_t and real_t should return real_t, and Coord and
-real_t should return real_t. */
+by users of this library. */
 template<typename Coord> struct coord_ops {
     /** Certain operations require double the bits of the maximum coordinate
-    value to avoid overflow. This type can be specialized if the default "long"
-    type is not wide enough for a given coordinate type. */
-    using long_t = long;
+    value to avoid overflow. This type can be specialized if the default type is
+    not wide enough for a given coordinate type. */
+    using long_t = std::conditional_t<(sizeof(Coord) < sizeof(long)),
+        long,
+#if POLY_OPS_HAVE_128BIT_INT
+        std::conditional_t<(sizeof(Coord) < sizeof(long long)),
+            long long,
+            basic_int128>
+#else
+        long long
+#endif
+        >;
 
-    /** The coordinates of generated points are usually real numbers. By
+    /** The coordinates of generated points are usually not integers. By
     default, they are represented by double before being rounded back to
     integers. This type can be specialized to use float instead, or some custom
     type for more precision. */
     using real_t = double;
+
+    /** Multiply without overflowing. */
+    static long_t mul(Coord a,Coord b) {
+#if POLY_OPS_HAVE_128BIT_INT
+        if constexpr(std::is_same_v<long_t,basic_int128>) {
+            return basic_int128::mul(a,b);
+        }
+#endif
+        return static_cast<long_t>(a) * b;
+    }
 
     /** Functions need to be defined that are equivalent to the following
     functions from the "std" namespace: */
@@ -42,8 +60,9 @@ template<typename Coord> struct coord_ops {
     static Coord floor(real_t x) { return static_cast<Coord>(std::floor(x)); }
     static Coord ceil(real_t x) { return static_cast<Coord>(std::ceil(x)); }
 
-    /** After dermining how many points to use to approximate an arc using real
-    numbers, the value needs to be converted to an integer to use in a loop */
+    /** After determining how many points to use to approximate an arc using
+    real numbers, the value needs to be converted to an integer to use in a loop
+    */
     static Coord to_coord(real_t x) { return static_cast<Coord>(x); }
 
     /** Return a value with the same sign as "x" but with a magnitude of 1 */
@@ -61,21 +80,19 @@ coordinates respectively. */
 template<typename T> struct point_ops {};
 
 template<typename T> struct point_ops<T[2]> {
-    static constexpr const T &get_x(const T (&p)[2]) { return p[0]; }
-    static constexpr const T &get_y(const T (&p)[2]) { return p[1]; }
+    static constexpr const T &get_x(const T (&p)[2]) noexcept { return p[0]; }
+    static constexpr const T &get_y(const T (&p)[2]) noexcept { return p[1]; }
 };
 
 template<typename T> struct point_ops<std::span<T,2>> {
-    static constexpr const T &get_x(const std::span<T,2> &p) { return p[0]; }
-    static constexpr const T &get_y(const std::span<T,2> &p) { return p[1]; }
+    static constexpr const T &get_x(const std::span<T,2> &p) noexcept { return p[0]; }
+    static constexpr const T &get_y(const std::span<T,2> &p) noexcept { return p[1]; }
 };
 
 namespace detail {
 template<typename T> concept arithmetic = requires(T x) {
     { x + x } -> std::same_as<T>;
     { x - x } -> std::same_as<T>;
-    { x * x } -> std::same_as<T>;
-    { x / x } -> std::same_as<T>;
     { -x } -> std::same_as<T>;
 };
 template<typename Lesser,typename Greater>
@@ -84,16 +101,12 @@ concept arithmetic_promotes = requires(Lesser a,Greater b) {
     { b + a } -> std::same_as<Greater>;
     { a - b } -> std::same_as<Greater>;
     { b - a } -> std::same_as<Greater>;
-    { a * b } -> std::same_as<Greater>;
-    { b * a } -> std::same_as<Greater>;
-    { a / b } -> std::same_as<Greater>;
-    { b / a } -> std::same_as<Greater>;
 };
 } // namespace detail
 
 template<typename T> concept coordinate =
     detail::arithmetic<T>
-    && detail::arithmetic<typename coord_ops<T>::long_t>
+    && detail::arithmetic<long_coord_t<T>>
     && detail::arithmetic<real_coord_t<T>>
     && detail::arithmetic_promotes<T,long_coord_t<T>>
     && detail::arithmetic_promotes<T,real_coord_t<T>>
@@ -101,6 +114,7 @@ template<typename T> concept coordinate =
     && std::totally_ordered<long_coord_t<T>>
     && std::totally_ordered<real_coord_t<T>>
     && std::convertible_to<T,long_coord_t<T>>
+    && std::convertible_to<int,long_coord_t<T>>
     && std::convertible_to<T,real_coord_t<T>>
     && requires(T c,long_coord_t<T> cl,real_coord_t<T> cr) {
         static_cast<long>(c);
@@ -115,6 +129,11 @@ template<typename T> concept coordinate =
         { coord_ops<T>::floor(cr) } -> std::same_as<T>;
         { coord_ops<T>::to_coord(cr) } -> std::same_as<T>;
         { coord_ops<T>::pi() } -> std::same_as<real_coord_t<T>>;
+        { coord_ops<T>::mul(c,c) } -> std::same_as<long_coord_t<T>>;
+        { cr * cr } -> std::same_as<real_coord_t<T>>;
+        { cr / cr } -> std::same_as<real_coord_t<T>>;
+        { c * cr } -> std::same_as<real_coord_t<T>>;
+        { cr * c } -> std::same_as<real_coord_t<T>>;
     };
 
 
@@ -127,14 +146,14 @@ template<typename T> struct point_t {
     T _data[2];
 
     point_t() = default;
-    constexpr point_t(const T &x,const T &y) {
-        _data[0] = x;
-        _data[1] = y;
-    }
-    template<point<T> U> constexpr point_t(const U &b) {
-        _data[0] = point_ops<U>::get_x(b);
-        _data[1] = point_ops<U>::get_y(b);
-    }
+    constexpr point_t(const T &x,const T &y) noexcept(std::is_nothrow_copy_constructible_v<T>)
+        : _data{x,y} {}
+    constexpr point_t(const point_t &b) = default;
+    template<point<T> U> constexpr point_t(const U &b)
+        noexcept(std::is_nothrow_copy_constructible_v<T>
+            && noexcept(point_ops<U>::get_x(b))
+            && noexcept(point_ops<U>::get_y(b)))
+        : _data{point_ops<U>::get_x(b),point_ops<U>::get_y(b)} {}
 
     constexpr T &operator[](std::size_t i) noexcept { return _data[i]; }
     constexpr const T &operator[](std::size_t i) const noexcept { return _data[i]; }
@@ -183,8 +202,8 @@ template<typename T> struct point_t {
 };
 
 template<typename T> struct point_ops<point_t<T>> {
-    static constexpr const T &get_x(const point_t<T> &p) { return p[0]; }
-    static constexpr const T &get_y(const point_t<T> &p) { return p[1]; }
+    static constexpr const T &get_x(const point_t<T> &p) noexcept { return p[0]; }
+    static constexpr const T &get_y(const point_t<T> &p) noexcept { return p[1]; }
 };
 
 template<typename T,typename U>
@@ -271,8 +290,8 @@ template<typename Coord> constexpr long_coord_t<Coord> triangle_winding(
     const point_t<Coord> &p2,
     const point_t<Coord> &p3)
 {
-    return static_cast<long_coord_t<Coord>>(p3[0]-p1[0])*(p2[1]-p1[1]) -
-        static_cast<long_coord_t<Coord>>(p2[0]-p1[0])*(p3[1]-p1[1]);
+    return coord_ops<Coord>::mul(p3[0]-p1[0],p2[1]-p1[1]) -
+        coord_ops<Coord>::mul(p2[0]-p1[0],p3[1]-p1[1]);
 }
 
 template<typename Coord,typename T>
@@ -294,6 +313,25 @@ template<typename T,typename Coord> concept point_range
 template<typename T,typename Coord> concept point_range_range
     = std::ranges::sized_range<T> && point_range<std::ranges::range_value_t<T>,Coord>;
 
+template<coordinate Coord> class winding_dir_sink {
+    point_t<Coord> first;
+    point_t<Coord> prev;
+    long_coord_t<Coord> r;
+
+public:
+    winding_dir_sink(point_t<Coord> first)
+        : first{first}, prev{first}, r(0) {}
+    
+    void operator()(point_t<Coord> p) {
+        r += coord_ops<Coord>::mul(prev[0]-p[0],prev[1]+p[1]);
+        prev = p;
+    }
+
+    long_coord_t<Coord> close() {
+        return r + coord_ops<Coord>::mul(prev[0]-first[0],prev[1]+first[1]);
+    }
+};
+
 /** Returns a positive number if clockwise, negative if counter-clockwise and
 zero if degenerate or exactly half of the polygon's area is inverted.
 
@@ -301,20 +339,14 @@ This algorithm works on any polygon. For non-overlapping non-inverting polygons,
 more efficient methods exist. The magnitude of the return value is two times the
 area of the polygon.*/
 template<coordinate Coord,point_range<Coord> Points>
-long_coord_t<Coord> winding_dir(Points &&points)
-{
+long_coord_t<Coord> winding_dir(Points &&points) {
     auto itr = std::ranges::begin(points);
     auto end = std::ranges::end(points);
     if(itr == end) return 0;
-    point_t first(*itr);
-    point_t last=first;
-    Coord r = 0;
-    while( ++itr != end) {
-        point_t p(*itr);
-        r += static_cast<long_coord_t<Coord>>(last[0]-p[0]) * (last[1]+p[1]);
-        last = p;
-    }
-    return r + static_cast<long_coord_t<Coord>>(last[0]-first[0]) * (last[1]+first[1]);
+
+    winding_dir_sink<Coord> sink{*itr};
+    while(++itr != end) sink(*itr);
+    return sink.close();
 }
 
 } // namespace poly_ops
