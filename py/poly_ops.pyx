@@ -1,6 +1,7 @@
 #cython: language_level=3, boundscheck=False, wraparound=False
 #distutils: language = c++
 
+cimport cython
 import numpy as np
 cimport numpy as np
 
@@ -139,7 +140,7 @@ cdef extern from *:
 
     PyObject *poly_proxy_to_py_tree(const temp_poly_proxy &x,PyArray_Descr *dtype) noexcept {
         PyObject *r = PyTuple_New(2);
-        if(NPY_UNLIKELY(!r)) return r;
+        if(NPY_UNLIKELY(!r)) return nullptr;
         PyObject *tmp = poly_proxy_to_py(x,dtype);
         if(NPY_UNLIKELY(!tmp)) {
             Py_DECREF(r);
@@ -160,7 +161,7 @@ cdef extern from *:
     template<typename R,typename ChildF>
     PyObject *proxy_range_to_py(const R &x,ChildF childf,PyArray_Descr *dtype) noexcept {
         PyObject *r = PyTuple_New(static_cast<Py_ssize_t>(x.size()));
-        if(!r) return r;
+        if(NPY_UNLIKELY(!r)) return r;
 
         Py_ssize_t ti = 0;
         for(auto &&p : x) {
@@ -421,7 +422,9 @@ def boolean_op_tree(subject,clip,BoolOp op,*,casting='same_kind',dtype=None):
 def boolean_op_flat(subject,clip,BoolOp op,*,casting='same_kind',dtype=None):
     return boolean_op_(0,subject,clip,op,casting,dtype)
 
+@cython.auto_pickle(False)
 cdef class Clipper:
+    cdef object __weakref__
     cdef clipper _clip
     cdef object calc_dtype
 

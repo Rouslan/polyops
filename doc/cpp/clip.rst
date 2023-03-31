@@ -135,12 +135,18 @@ Types
     An opaque type that models `std::ranges::forward_range` and
     `std::ranges::sized_range`.
 
+    Unlike :cpp:type:`temp_polygon_tree_range`, an instance of this type does
+    not own its data.
+
 
 .. cpp:type:: template<typename Coord,typename Index=std::size_t>\
         borrowed_temp_polygon_range
 
     An opaque type that models `std::ranges::forward_range` and
     `std::ranges::sized_range`.
+
+    Unlike :cpp:type:`temp_polygon_range`, an instance of this type does not own
+    its data.
 
 
 .. cpp:type:: template<typename Coord,typename Index=std::size_t>\

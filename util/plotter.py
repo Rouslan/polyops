@@ -15,7 +15,7 @@ class MyEncoder(json.JSONEncoder):
             return list(obj)
         if isinstance(obj,ScaledLoopPoint):
             return {'p':obj.p,'next':obj.next}
-        
+
         super().default(obj)
 
 class Vec(namedtuple('_VecBase','x y')):
@@ -30,37 +30,37 @@ class Vec(namedtuple('_VecBase','x y')):
             if hasattr(type(args[0]),'__iter__'):
                 return super().__new__(cls,*args[0])
             return super().__new__(cls,args[0],args[0])
-        
+
         raise TypeError('Vec takes 1 or 2 arguments')
 
     def __add__(self,b):
         return Vec(map(operator.add,self,Vec(b)))
-    
+
     __radd__ = __add__
 
     def __sub__(self,b):
         return Vec(map(operator.sub,self,Vec(b)))
-    
+
     def __rsub__(self,a):
         return Vec(map(operator.add,Vec(a),self))
-    
+
     def __mul__(self,b):
         return Vec(map(operator.mul,self,Vec(b)))
-    
+
     __rmul__ = __mul__
 
     def __truediv__(self,b):
         return Vec(map(operator.truediv,self,Vec(b)))
-    
+
     def __rtruediv__(self,a):
         return Vec(map(operator.truediv,Vec(a),self))
-    
+
     def __floordiv__(self,b):
         return Vec(map(operator.floordiv,self,Vec(b)))
-    
+
     def __rfloordiv__(self,a):
         return Vec(map(operator.floordiv,Vec(a),self))
-    
+
     @staticmethod
     def map(fun,*args):
         return Vec(map(fun,*args))
@@ -131,7 +131,7 @@ def run_plotter(file):
             p = data[indices[0]].scaled_p
             can.create_text(p,text=str('/'.join(map(str,indices))),fill='#00aa00')
             ci_to_pi[pcan.create_rectangle(p,p,width=0)] = indices[0]
-        
+
         unpadded_area = (maxc - minc) * sfactor
         bottom_right = unpadded_area + PADDING*2
         can.configure(scrollregion=(
@@ -161,20 +161,21 @@ def run_plotter(file):
     def onmove(e):
         nonlocal sel_coord
 
-        cp = pcan.find_closest(e.x,e.y)
+        mp = Vec(can.canvasx(e.x),can.canvasy(e.y))
+        cp = pcan.find_closest(*mp)
         new_coord = -1
         if len(cp):
             pi = ci_to_pi[cp[0]]
             p = data[pi]
-            delta = p.scaled_p - (e.x,e.y)
+            delta = p.scaled_p - mp
             if (delta.x*delta.x + delta.y*delta.y) <= 25:
                 new_coord = pi
-        
+
         if new_coord != sel_coord:
             if sel_coord >= 0:
                 for i in p_indices[data[sel_coord].p]:
                     can.itemconfigure('_'+str(i),fill='black')
-            
+
             if new_coord >= 0:
                 sparts = []
                 for i in p_indices[data[new_coord].p]:
@@ -184,7 +185,7 @@ def run_plotter(file):
                 status['text'] = '{},{}: {}'.format(data[new_coord].p[0],data[new_coord].p[1],', '.join(sparts))
             else:
                 status['text'] = ''
-            
+
             sel_coord = new_coord
 
 
@@ -205,17 +206,11 @@ def run_plotter(file):
         new_c0 = c * unpadded_area + PADDING - (e.x,e.y)
         scroll = new_c0 / full_area
 
-        print(full_area,new_c0)
-
         can.xview_moveto(scroll.x)
         can.yview_moveto(scroll.y)
 
     can.bind('<Button-4>',onscroll)
     can.bind('<Button-5>',onscroll)
-
-    def click_test(e):
-        print(e.x,e.y,can.canvasx(e.x),can.canvasy(e.y))
-    can.bind('<Button-1>',click_test)
 
     def onsave(e):
         f = filedialog.asksaveasfile(parent=win,defaultextension='.txt')
@@ -236,7 +231,7 @@ def run_plotter(file):
             while len(chunk) == READ_SIZE:
                 chunk = os.read(file,READ_SIZE)
                 line += str(chunk,encoding='utf-8')
-            
+
             parts = line.rsplit('\n',maxsplit=2)
             line = parts.pop()
 
@@ -248,7 +243,7 @@ def run_plotter(file):
             if len(line):
                 data_pend = line
                 win.event_generate('<<NewData>>')
-    
+
     win.tk.createfilehandler(file,tk.READABLE,file_handler)
 
     win.mainloop()

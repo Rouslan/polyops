@@ -357,6 +357,8 @@ Functions
 
 .. cpp:function:: template<typename T> constexpr T square(const point_t<T> &a)
 
+    Equal to ``a[0]*a[0] + a[1]*a[1]``
+
 .. cpp:function:: template<typename T,typename U>\
     constexpr point_t<T> vcast(const point_t<U> &x)
 

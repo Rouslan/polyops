@@ -280,7 +280,8 @@ template<typename Index> struct event {
 enum class at_edge_t {
     start = -1,
     no = 0,
-    end = 1};
+    end = 1,
+    both = 2};
 
 template<typename Coord> at_edge_t is_edge(Coord val,Coord end_val) {
     if(val == 0) return at_edge_t::start;
@@ -343,10 +344,15 @@ bool intersects_parallel(
         return true;
     }
 
-    /* if both points intersect, we just return the first one */
+    /* if both points intersect, p is not set */
     if(lo1 == lo2 && hi1 == hi2) {
         if(d1a == d2a) {
             if(s1.a != s2.a) {
+                if(s1.b != s2.b) {
+                    at_edge[0] = at_edge_t::both;
+                    at_edge[1] = at_edge_t::both;
+                    return true;
+                }
                 p = s1.pa;
                 at_edge[0] = at_edge_t::start;
                 at_edge[1] = at_edge_t::start;
@@ -359,6 +365,11 @@ bool intersects_parallel(
             }
         } else {
             if(s1.a != s2.b) {
+                if(s1.b != s2.a) {
+                    at_edge[0] = at_edge_t::both;
+                    at_edge[1] = at_edge_t::both;
+                    return true;
+                }
                 p = s1.pa;
                 at_edge[0] = at_edge_t::start;
                 at_edge[1] = at_edge_t::end;
@@ -1058,12 +1069,20 @@ using intr_array_t = std::pmr::vector<intr_t<Index>>;
 
 /* This is only used for debugging */
 template<typename Index,typename Coord>
-bool intersects_any(const sweep_node<Index,Coord> &s1,const sweep_t<Index,Coord> &sweep) {
+bool intersects_any(const sweep_node<Index,Coord> &s1,const sweep_t<Index,Coord> &sweep,std::pmr::vector<loop_point<Index,Coord>> &lpoints) {
+    auto is_marked = [&](at_edge_t edge,const sweep_node<Index,Coord> &s) {
+        if(edge == at_edge_t::both) {
+            return lpoints[s.value.a].state() == line_state_t::check && lpoints[s.value.b].state() == line_state_t::check;
+        }
+        return lpoints[edge == at_edge_t::start ? s.value.a : s.value.b].state() == line_state_t::check;
+    };
     rand_generator rgen;
     for(auto s2 : sweep) {
         point_t<Coord> intr;
         at_edge_t at_edge[2];
-        if(intersects(s1.value,s2.value,intr,at_edge,rgen) && (at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no)) {
+        if(intersects(s1.value,s2.value,intr,at_edge,rgen) &&
+                (at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no ||
+                !(is_marked(at_edge[0],s1) && is_marked(at_edge[1],s2)))) {
             POLY_OPS_DEBUG_STEP_BY_STEP_MISSED_INTR;
             return true;
         }
@@ -1716,6 +1735,8 @@ Index clipper<Coord,Index>::split_segment(
 {
     using namespace detail;
 
+    POLY_OPS_ASSERT(at_edge != at_edge_t::both);
+
     Index sa = sweep_nodes[s].value.a;
     Index sb = sweep_nodes[s].value.b;
 
@@ -1766,6 +1787,8 @@ bool clipper<Coord,Index>::check_intersection(
     point_t<Coord> intr;
     at_edge_t at_edge[2];
     if(intersects(sweep_nodes[s1].value,sweep_nodes[s2].value,intr,at_edge,rgen)) {
+        POLY_OPS_ASSERT((at_edge[0] == at_edge_t::both) == (at_edge[1] == at_edge_t::both));
+
         Index intr1,intr2;
 
         if(at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no) [[likely]] {
@@ -1779,11 +1802,20 @@ bool clipper<Coord,Index>::check_intersection(
 
             return true;
         } else {
-            intr1 = at_edge[0] == at_edge_t::start ? sweep_nodes[s1].value.a : sweep_nodes[s1].value.b;
-            intr2 = at_edge[1] == at_edge_t::start ? sweep_nodes[s2].value.a : sweep_nodes[s2].value.b;
+            if(at_edge[0] == at_edge_t::both) [[unlikely]] {
+                auto &s1_seg = sweep_nodes[s1].value;
+                auto &s2_seg = sweep_nodes[s2].value;
+                lpoints[s1_seg.a].state() = line_state_t::check;
+                lpoints[s1_seg.b].state() = line_state_t::check;
+                lpoints[s2_seg.a].state() = line_state_t::check;
+                lpoints[s2_seg.b].state() = line_state_t::check;
+            } else {
+                intr1 = at_edge[0] == at_edge_t::start ? sweep_nodes[s1].value.a : sweep_nodes[s1].value.b;
+                intr2 = at_edge[1] == at_edge_t::start ? sweep_nodes[s2].value.a : sweep_nodes[s2].value.b;
 
-            lpoints[intr1].state() = line_state_t::check;
-            lpoints[intr2].state() = line_state_t::check;
+                lpoints[intr1].state() = line_state_t::check;
+                lpoints[intr2].state() = line_state_t::check;
+            }
         }
     }
 
@@ -1862,7 +1894,7 @@ void clipper<Coord,Index>::self_intersection() {
                         check_intersection(sweep,std::prev(itr).index(),itr.index());
                     }
 
-                    POLY_OPS_ASSERT_SLOW(!intersects_any(sweep_nodes[e.sweep_node],sweep));
+                    POLY_OPS_ASSERT_SLOW(!intersects_any(sweep_nodes[e.sweep_node],sweep,lpoints));
                 } else {
                     events.current().status = event_status_t::deleted;
                 }

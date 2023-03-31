@@ -184,7 +184,7 @@ template<typename T> std::ostream &operator<<(std::ostream &os,const _pp<T> &x) 
 template<typename R> void write_loops(std::ostream &os,R &&loops) {
     bool first = true;
     for(auto &&loop : loops) {
-        if(!first) os << "-\n";
+        if(!first) os << "===\n";
         first = false;
         for(auto &&raw_p : loop) {
             poly_ops::point_t<coord_t> p(raw_p);
@@ -222,7 +222,7 @@ template<typename Coord> void read_loops(std::istream &is,std::vector<std::vecto
             break;
         }
         auto c = is.peek();
-        if(c == '-') {
+        if(c == '=') {
             if(c_count) odd_coord_count();
             is.get();
             loops.emplace_back();

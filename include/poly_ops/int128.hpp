@@ -82,7 +82,9 @@ public:
     basic_int128() noexcept = default;
     basic_int128(detail::int128_t x) noexcept : base(x) {}
     basic_int128(std::integral auto x) noexcept : base(x) {}
-    explicit basic_int128(std::floating_point auto x) noexcept : base(x) {}
+    explicit basic_int128(std::floating_point auto x) noexcept : base(static_cast<detail::int128_t>(x)) {}
+    basic_int128(std::uint64_t hi,std::uint64_t lo) noexcept
+        : base(detail::int128_t(lo) + (detail::int128_t(hi) << 64)) {}
     basic_int128(const basic_int128&) noexcept = default;
 
     basic_int128 &operator=(const basic_int128&) noexcept = default;
@@ -98,6 +100,8 @@ public:
 
     operator detail::int128_t() const noexcept { return base; }
     template<detail::builtin_number T> explicit operator T() const noexcept { return static_cast<T>(base); }
+
+    explicit operator bool() const noexcept { return base != 0; }
 
     friend basic_int128 operator+(basic_int128 a,basic_int128 b) noexcept {
         return a.base + b.base;
@@ -138,8 +142,8 @@ public:
         return a.base <=> b;
     }
 
-    std::uint64_t lo() { return static_cast<std::uint64_t>(base); }
-    std::uint64_t hi() { return static_cast<std::uint64_t>(base >> 64); }
+    std::uint64_t lo() const noexcept { return static_cast<std::uint64_t>(base); }
+    std::uint64_t hi() const noexcept { return static_cast<std::uint64_t>(base >> 64); }
 
     static basic_int128 mul(std::int64_t a,std::int64_t b) noexcept {
         return static_cast<detail::int128_t>(a) * b;
@@ -346,8 +350,8 @@ public:
         return a < static_cast<unsigned __int64>(b);
     }
 
-    unsigned __int64 lo() { return lo; }
-    unsigned __int64 hi() { return hi; }
+    unsigned __int64 lo() const noexcept { return lo; }
+    unsigned __int64 hi() const noexcept { return hi; }
 
     static basic_int128 mul(__int64 a,__int64 b) noexcept {
         basic_int128 r;
