@@ -90,7 +90,16 @@ Concepts
 
     .. code-block:: cpp
 
-        std::ranges::sized_range<T> && point_range<std::ranges::range_value_t<T>,Coord>
+        std::ranges::range<T> && point_range<std::ranges::range_value_t<T>,Coord>
+
+.. cpp:concept:: template<typename T,typename Coord> point_range_or_range_range
+
+    Defined as:
+
+    .. code-block:: cpp
+
+        std::ranges::range<T> && (point_range<std::ranges::range_value_t<T>,Coord>
+            || point<std::ranges::range_value_t<T>,Coord>)
 
 
 Types
@@ -129,14 +138,14 @@ Types
 
     .. cpp:type:: long_t
 
-        Certain operations require double the bits of the maximum coordinate
-        value to avoid overflow.
+        Certain operations require multiplying two coordinate values and thus
+        need double the bits of the maximum coordinate value to avoid overflow.
 
-        By default, if the target is a 64-bit platforms and `Coord` is a 64 bit
-        type, this is :cpp:class:`basic_int128`. On other platforms if `Coord`
-        is not smaller than `long`, this is `long long`. Otherwise this is
-        `long`.
-        
+        By default, if the compile target is a 64-bit platform and `Coord` is a
+        64 bit type, this is :cpp:class:`basic_int128`. On other platforms, if
+        `Coord` is not smaller than `long`, this is `long long`. Otherwise this
+        is `long`.
+
         This can be specialized as a user-defined type.
 
     .. cpp:type:: real_t = double
@@ -151,8 +160,8 @@ Types
         Multiply `a` and `b` and return the result.
 
         This should be equivalent to
-        ``static_cast<long_t>(a) * static_cast<long_t>(b)``, except `long_t` is
-        not required to support multiplication.
+        :cpp:expr:`static_cast<long_t>(a) * static_cast<long_t>(b)`, except
+        `long_t` is not required to support multiplication.
 
     .. cpp:function:: static real_t acos(Coord x)
 
@@ -163,6 +172,7 @@ Types
             return std::acos(static_cast<real_t>(x));
 
     .. cpp:function:: static real_t acos(real_t x)
+        :nocontentsentry:
 
         Default implementation:
 
@@ -195,6 +205,7 @@ Types
             return std::sqrt(static_cast<real_t>(x));
 
     .. cpp:function:: static real_t sqrt(real_t x)
+        :nocontentsentry:
 
         Default implementation:
 
@@ -240,7 +251,7 @@ Types
 
     .. cpp:function:: static real_t unit(real_t x)
 
-        Return a value with the same sign as "x" but with a magnitude of 1
+        Return a value with the same sign as `x` but with a magnitude of 1
 
         Default implementation:
 
@@ -268,30 +279,37 @@ Types
         The default constructor leaves the values uninitialized
 
     .. cpp:function:: constexpr point_t(const T &x,const T &y)
+        :nocontentsentry:
 
     .. cpp:function:: template<point<T> U> constexpr point_t(const U &b)
+        :nocontentsentry:
 
         Construct `point_t` from any point-like object
 
     .. cpp:function:: constexpr T &operator[](std::size_t i) noexcept
 
     .. cpp:function:: constexpr const T &operator[](std::size_t i) const noexcept
+        :nocontentsentry:
 
     .. cpp:function:: constexpr T &x() noexcept
 
     .. cpp:function:: constexpr const T &x() const noexcept
+        :nocontentsentry:
 
     .. cpp:function:: constexpr T &y() noexcept
 
     .. cpp:function:: constexpr const T &y() const noexcept
+        :nocontentsentry:
 
     .. cpp:function:: constexpr T *begin() noexcept
 
     .. cpp:function:: constexpr const T *begin() const noexcept
+        :nocontentsentry:
 
     .. cpp:function:: constexpr T *end() noexcept
 
     .. cpp:function:: constexpr const T *end() const noexcept
+        :nocontentsentry:
 
     .. cpp:function:: constexpr std::size_t size() const noexcept
 
@@ -302,6 +320,7 @@ Types
         Return a pointer to the underlying array
 
     .. cpp:function:: constexpr const T *data() const noexcept
+        :nocontentsentry:
 
         Return a pointer to the underlying array
 
@@ -323,32 +342,61 @@ Functions
     constexpr point_t<decltype(std::declval<T>()+std::declval<U>())>\
     operator+(const point_t<T> &a,const point_t<U> &b)
 
+    Element-wise addition.
+
+    Equivalent to :cpp:expr:`point_t{a[0]+b[0],a[1]+b[1]}`
+
 .. cpp:function:: template<typename T,typename U>\
     constexpr point_t<decltype(std::declval<T>()-std::declval<U>())>\
     operator-(const point_t<T> &a,const point_t<U> &b)
+
+    Element-wise subtraction.
+
+    Equivalent to :cpp:expr:`point_t{a[0]-b[0],a[1]-b[1]}`
 
 .. cpp:function:: template<typename T,typename U>\
     constexpr point_t<decltype(std::declval<T>()*std::declval<U>())>\
     operator*(const point_t<T> &a,const point_t<U> &b)
 
-.. cpp:function:: template<typename T,typename U>\
-    constexpr point_t<decltype(std::declval<T>()/std::declval<U>())>\
-    operator/(const point_t<T> &a,const point_t<U> &b)
+    Element-wise multiplication.
+
+    Equivalent to :cpp:expr:`point_t{a[0]*b[0],a[1]*b[1]}`
 
 .. cpp:function:: template<typename T,typename U>\
     constexpr point_t<decltype(std::declval<T>()*std::declval<U>())>\
     operator*(const point_t<T> &a,U b)
+    :nocontentsentry:
+
+    Element-wise multiplication.
+
+    Equivalent to :cpp:expr:`point_t{a[0]*b,a[1]*b}`
 
 .. cpp:function:: template<typename T,typename U>\
     constexpr point_t<decltype(std::declval<T>()*std::declval<U>())>\
     operator*(T a,const point_t<U> &b)
+    :nocontentsentry:
+
+    Element-wise multiplication.
+
+    Equivalent to :cpp:expr:`point_t{a*b[0],a*b[1]}`
+
+.. cpp:function:: template<typename T,typename U>\
+    constexpr point_t<decltype(std::declval<T>()/std::declval<U>())>\
+    operator/(const point_t<T> &a,const point_t<U> &b)
+
+    Element-wise division.
+
+    Equivalent to :cpp:expr:`point_t{a[0]/b[0],a[1]/b[1]}`
 
 .. cpp:function:: template<typename T>\
     constexpr bool operator==(const point_t<T> &a,const point_t<T> &b)
 
+    Equivalent to :cpp:expr:`a[0] == b[0] && a[1] == b[1]`
+
 .. cpp:function:: template<typename T>\
     constexpr bool operator!=(const point_t<T> &a,const point_t<T> &b)
 
+    Equivalent to :cpp:expr:`a[0] != b[0] || a[1] != b[1]`
 
 .. cpp:function:: template<typename T,typename U>\
     constexpr auto vdot(const point_t<T> &a,const point_t<U> &b)
@@ -357,7 +405,7 @@ Functions
 
 .. cpp:function:: template<typename T> constexpr T square(const point_t<T> &a)
 
-    Equal to ``a[0]*a[0] + a[1]*a[1]``
+    Equivalent to :cpp:expr:`a[0]*a[0] + a[1]*a[1]`
 
 .. cpp:function:: template<typename T,typename U>\
     constexpr point_t<T> vcast(const point_t<U> &x)

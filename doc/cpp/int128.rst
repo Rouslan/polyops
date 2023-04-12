@@ -1,4 +1,4 @@
-poly_ops/clipper.hpp
+poly_ops/int128.hpp
 =====================
 
 .. cpp:namespace:: poly_ops
@@ -23,35 +23,43 @@ Types
     This only supports some of the operations that built-in integers support:
     addition, subtraction, negation and comparison. Multiplication and bit-wise
     operations are absent. Additionally, the standard library will not recognize
-    this class as an integer (e.g.: ``std::is_integer<poly_ops::basic128>`` will
-    have a value of `false`).
+    this class as an integer (e.g.: ``std::is_integer<poly_ops::basic_int128>``
+    will have a value of `false`).
 
     .. cpp:function:: basic_int128() noexcept = default
 
     .. cpp:function:: basic_int128(__int128 x) noexcept
+        :nocontentsentry:
 
         This constructor is only defined for compilers that have a built-in
         128-bit type named __int128
 
     .. cpp:function:: basic_int128(std::integral auto x) noexcept
+        :nocontentsentry:
 
     .. cpp:function:: explicit basic_int128(std::floating_point auto x) noexcept
+        :nocontentsentry:
 
     .. cpp:function:: basic_int128(std::uint64_t hi,std::uint64_t lo) noexcept
+        :nocontentsentry:
 
     .. cpp:function:: basic_int128(const basic_int128&) noexcept = default
+        :nocontentsentry:
 
     .. cpp:function:: basic_int128 &operator=(const basic_int128&) noexcept = default
 
     .. cpp:function:: basic_int128 &operator=(std::integral auto b) noexcept
+        :nocontentsentry:
 
     .. cpp:function:: basic_int128 &operator+=(basic_int128 b) noexcept
 
     .. cpp:function:: basic_int128 &operator+=(std::integral auto b) noexcept
+        :nocontentsentry:
 
     .. cpp:function:: basic_int128 &operator-=(basic_int128 b) noexcept
 
     .. cpp:function:: basic_int128 &operator-=(std::integral auto b) noexcept
+        :nocontentsentry:
 
     .. cpp:function:: basic_int128 operator-() const noexcept
 
@@ -69,26 +77,34 @@ Types
     .. cpp:function:: friend basic_int128 operator+(basic_int128 a,basic_int128 b) noexcept
 
     .. cpp:function:: friend basic_int128 operator+(std::integral auto a,basic_int128 b) noexcept
+        :nocontentsentry:
 
     .. cpp:function:: friend basic_int128 operator+(basic_int128 a,std::integral auto b) noexcept
+        :nocontentsentry:
 
     .. cpp:function:: friend basic_int128 operator-(basic_int128 a,basic_int128 b) noexcept
 
     .. cpp:function:: friend basic_int128 operator-(std::integral auto a,basic_int128 b) noexcept
+        :nocontentsentry:
 
     .. cpp:function:: friend basic_int128 operator-(basic_int128 a,std::integral auto b) noexcept
+        :nocontentsentry:
 
     .. cpp:function:: friend bool operator==(basic_int128 a,basic_int128 b) noexcept
 
     .. cpp:function:: friend bool operator==(std::integral auto a,basic_int128 b) noexcept
+        :nocontentsentry:
 
     .. cpp:function:: friend bool operator==(basic_int128 a,std::integral auto b) noexcept
+        :nocontentsentry:
 
     .. cpp:function:: friend auto operator<=>(basic_int128 a,basic_int128 b) noexcept
 
     .. cpp:function:: friend auto operator<=>(std::integral auto a,basic_int128 b) noexcept
+        :nocontentsentry:
 
     .. cpp:function:: friend auto operator<=>(basic_int128 a,std::integral auto b) noexcept
+        :nocontentsentry:
 
     .. cpp:function:: std::uint64_t lo() const noexcept
 

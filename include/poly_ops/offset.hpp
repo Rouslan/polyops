@@ -85,18 +85,21 @@ namespace poly_ops {
 
 namespace detail {
 template<typename Index> using original_sets_t = mini_set_proxy_vector<Index,std::pmr::polymorphic_allocator<Index>>;
+template<typename Index> using original_set_replacements_t = indexed_mini_set_proxy_vector<Index,std::pmr::polymorphic_allocator<Index>>;
 template<typename Index> using original_set_t = mini_flat_set<Index,std::pmr::polymorphic_allocator<Index>>;
 
-template<typename Index> class origin_point_tracker : virtual public point_tracker<Index> {
-    original_sets_t<Index> original_sets;
+template<typename Index> class origin_point_tracker final : virtual public point_tracker<Index> {
+    original_set_replacements_t<Index> original_sets;
 
 public:
     origin_point_tracker(std::pmr::memory_resource *contig_mem)
         : original_sets(contig_mem) {}
 
     void point_added(Index original_i) override {
+        std::size_t end = original_sets.size();
         original_sets.emplace_back();
-        original_sets.back().insert(original_i);
+        original_sets.back().i = end;
+        original_sets.back().set.insert(original_i);
     }
 
     void new_intersection(Index a,Index b) override {
@@ -108,7 +111,15 @@ public:
     }
 
     void point_merge(Index from,Index to) override {
-        original_sets[to].merge(original_sets[from]);
+        original_sets[to].set.merge(original_sets[from].set);
+    }
+
+    void point_move(Index p,Index to) override {
+        original_sets[p].i = to;
+    }
+
+    void point_removed() override {
+        original_sets.pop_back();
     }
 };
 

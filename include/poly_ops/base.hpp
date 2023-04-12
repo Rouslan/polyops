@@ -311,7 +311,11 @@ template<typename T,typename Coord> concept point_range
     = std::ranges::range<T> && point<std::ranges::range_value_t<T>,Coord>;
 
 template<typename T,typename Coord> concept point_range_range
-    = std::ranges::sized_range<T> && point_range<std::ranges::range_value_t<T>,Coord>;
+    = std::ranges::range<T> && point_range<std::ranges::range_value_t<T>,Coord>;
+
+template<typename T,typename Coord> concept point_range_or_range_range
+    = std::ranges::range<T> && (point_range<std::ranges::range_value_t<T>,Coord>
+        || point<std::ranges::range_value_t<T>,Coord>);
 
 template<coordinate Coord> class winding_dir_sink {
     point_t<Coord> first;

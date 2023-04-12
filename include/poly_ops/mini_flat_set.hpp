@@ -21,21 +21,21 @@ class mini_flat_set {
     using alloc_traits = std::allocator_traits<Allocator>;
 
     struct data_t {
-        size_t capacity;
+        std::size_t capacity;
         T items[1];
     };
 
-    size_t _size;
+    std::size_t _size;
     union {
         T item;
         data_t *data;
     } u;
 
-    static size_t alloc_size(size_t n) {
+    static std::size_t alloc_size(std::size_t n) {
         return n + (offsetof(data_t,items) + sizeof(T) - 1) / sizeof(T);
     }
 
-    static data_t *alloc_data(Allocator &alloc,size_t n) {
+    static data_t *alloc_data(Allocator &alloc,std::size_t n) {
         data_t *r = reinterpret_cast<data_t*>(alloc_traits::allocate(alloc,alloc_size(n)));
         r->capacity = n;
         return r;
@@ -73,7 +73,7 @@ class mini_flat_set {
     T *append_items(Allocator &alloc,InputIt first,InputIt last) {
         assert(_size > 1);
 
-        size_t total = _size;
+        std::size_t total = _size;
         for(; first != last; ++first) {
             if(u.data->capacity == total) {
                 data_t *tmp = u.data;
@@ -92,7 +92,7 @@ class mini_flat_set {
 
         auto isize = std::distance(first,last);
 
-        size_t total = _size + isize;
+        std::size_t total = _size + isize;
         if(total > u.data->capacity) {
             data_t *tmp = u.data;
             u.data = alloc_data(alloc,total);
@@ -155,7 +155,7 @@ public:
         if(_size > 1) dealloc_data(alloc,u.data);
     }
 
-    size_t size() const noexcept { return _size; }
+    std::size_t size() const noexcept { return _size; }
     bool empty() const noexcept { return _size != 0; }
     T *begin() noexcept { return _size > 1 ? u.data->items : &u.item; }
     const T *begin() const noexcept { return _size > 1 ? u.data->items : &u.item; }
@@ -172,8 +172,8 @@ public:
 
             T tmp = u.item;
             u.data = alloc_data(alloc,2);
-            size_t i1 = 0;
-            size_t i2 = 1;
+            std::size_t i1 = 0;
+            std::size_t i2 = 1;
             if(value < tmp) std::swap(i1,i2);
 
             u.data->items[i1] = tmp;
@@ -268,7 +268,7 @@ public:
         return *this;
     }
 
-    size_t size() const noexcept { return data.size(); }
+    std::size_t size() const noexcept { return data.size(); }
     bool empty() const noexcept { return data.empty(); }
     T *begin() const noexcept { return data.begin(); }
     T *end() const noexcept { return data.end(); }
@@ -333,27 +333,54 @@ template<typename Alloc1,typename T2> struct two_tier_allocator_adapter : public
     }
 };
 
-template<typename T,typename Allocator> struct mini_set_proxy_vector {
-    using real_value_type = mini_flat_set<T,Allocator>;
+template<typename T,typename Allocator> struct mini_set_proxy_maker {
+    static mini_flat_set_alloc_proxy<T,Allocator> make(const mini_flat_set<T,Allocator> &value,Allocator alloc) noexcept {
+        return {value,alloc};
+    }
+};
+
+template<typename Index,typename Allocator> struct indexed_mini_flat_set {
+    Index i;
+    mini_flat_set<Index,Allocator> set;
+
+    void destroy(Allocator alloc) {
+        set.destroy(alloc);
+    }
+};
+
+template<typename Index,typename Allocator> struct indexed_mini_flat_set_proxy {
+    Index i;
+    mini_flat_set_alloc_proxy<Index,Allocator> set;
+};
+
+template<typename Index,typename Allocator> struct indexed_mini_set_proxy_maker {
+    static indexed_mini_flat_set_proxy<Index,Allocator> make(
+            const indexed_mini_flat_set<Index,Allocator> &value,Allocator alloc) noexcept
+    {
+        return {value.i,{value.set,alloc}};
+    }
+};
+
+template<typename T,typename Allocator,typename ProxyMaker> struct proxy_vector {
     using alloc_adapter = two_tier_allocator_adapter<
-        typename std::allocator_traits<Allocator>::template rebind_alloc<real_value_type>,T>;
-    using base_type = std::vector<real_value_type,alloc_adapter>;
-    using proxy = mini_flat_set_alloc_proxy<T,Allocator>;
+        typename std::allocator_traits<Allocator>::template rebind_alloc<T>,T>;
+    using base_type = std::vector<T,alloc_adapter>;
+    using proxy = decltype(ProxyMaker::make);
 
     base_type data;
 
-    explicit mini_set_proxy_vector(const Allocator &alloc)
+    explicit proxy_vector(const Allocator &alloc)
         : data(alloc_adapter(alloc)) {}
 
     /* since only the non-const functions need an allocator, we can return the
     real type in const accessors */
-    const real_value_type &operator[](typename base_type::size_type i) const { return data[i]; }
-    proxy operator[](typename base_type::size_type i) { return {data[i],data.get_allocator().alloc2}; }
+    const T &operator[](typename base_type::size_type i) const { return data[i]; }
+    proxy operator[](typename base_type::size_type i) { return ProxyMaker::make(data[i],data.get_allocator().alloc2); }
 
-    const real_value_type &font() const { return data.front(); }
-    proxy front() { return {data.front(),data.get_allocator().alloc2}; }
-    const real_value_type &back() const { return data.back(); }
-    proxy back() { return {data.back(),data.get_allocator().alloc2}; }
+    const T &font() const { return data.front(); }
+    proxy front() { return ProxyMaker::make(data.front(),data.get_allocator().alloc2); }
+    const T &back() const { return data.back(); }
+    proxy back() { return ProxyMaker::make(data.back(),data.get_allocator().alloc2); }
 
     auto begin() const { return data.begin(); }
     auto end() const { return data.end(); }
@@ -363,8 +390,20 @@ template<typename T,typename Allocator> struct mini_set_proxy_vector {
 
     void reserve(typename base_type::size_type new_cap) { data.reserve(new_cap); }
     void clear() { data.clear(); }
-    void emplace_back() { data.emplace_back(); } // mini_flat_set's constructor doesn't take any parameters
+    template<typename... Arg> void emplace_back(Arg&& ...arg) {
+        data.emplace_back(std::forward<Arg>(arg)...);
+    }
+    void pop_back() { data.pop_back(); }
 };
+
+template<typename T,typename Alloc> using mini_set_proxy_vector =
+    proxy_vector<T,Alloc,mini_set_proxy_maker<T,Alloc>>;
+
+template<typename Index,typename Alloc> using indexed_mini_set_proxy_vector =
+    proxy_vector<
+        indexed_mini_flat_set<Index,mini_flat_set<Index,Alloc>>,
+        Alloc,
+        indexed_mini_set_proxy_maker<Index,Alloc>>;
 
 } // namespace poly_ops::detail
 

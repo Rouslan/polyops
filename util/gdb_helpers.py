@@ -13,6 +13,15 @@ def cpp_loop_val_to_py(x):
     data = x['data']['_data']
     return {'p': (int(data[0]),int(data[1])), 'next': int(x['next'])}
 
+def vector_length_data(x):
+    impl = x['_M_impl']
+    start = impl['_M_start']
+    end = impl['_M_finish']
+    return (int(end-start),start)
+
+def vector_data(x):
+    return x['_M_impl']['_M_start']
+
 class Plotter(gdb.Command):
     """Display the lines represented by a vector of poly_ops::detail::loop_point
     instances."""
@@ -24,8 +33,7 @@ class Plotter(gdb.Command):
     def invoke(self,argument,from_tty):
         if not argument: raise gdb.GdbError('an argument is required')
 
-        data = gdb.parse_and_eval('({}).data()'.format(argument))
-        size = int(gdb.parse_and_eval('({}).size()'.format(argument)))
+        size,data = vector_length_data(gdb.parse_and_eval(argument))
 
         if size > MAX_PLOT_SIZE: size = MAX_PLOT_SIZE
 
@@ -47,7 +55,88 @@ class PointPrinter:
         data = self.val['_data']
         return '{%i,%i}' % (int(data[0]),int(data[1]))
 
+class SweepSetIter:
+    def __init__(self,nodes,n,nil):
+        self.nodes = nodes
+        self.n = n
+        self.nil = nil
+    
+    def __iter__(self):
+        return self
+    
+    def __next__(self):
+        if int(self.n) == 0:
+            raise StopIteration
+        
+        node_obj = self.nodes[self.n]
+        value = node_obj['value']
+
+        next_n = node_obj['right']
+        if next_n != self.nil:
+            while True:
+                self.n = next_n
+                next_n = self.nodes[next_n]['left']
+                if next_n == self.nil:
+                    break
+        else:
+            p = node_obj['parent']
+            p_obj = self.nodes[p]
+            while self.n == p_obj['right']:
+                self.n = p
+                p = p_obj['parent']
+                p_obj = self.nodes[p]
+
+            if self.nodes[self.n]['right'] != p: self.n = p
+
+        return value
+
+def sweep_set_iter(val):
+    nodes = vector_data(val['traits_val']['vec'].dereference())
+    index_t = val.type.template_argument(1)
+    bits = 8 * index_t.sizeof
+    if index_t.is_signed:
+        bits -= 1
+    return SweepSetIter(nodes,nodes[0]['left'],(1 << bits) - 1)
+
+class SweepSetPrinter:
+    """Print a poly_ops::detail::sweep_set instance"""
+    def __init__(self,val):
+        self.val = val
+    
+    def __iter__(self):
+        return enumerate(sweep_set_iter(self.val))
+    
+    def to_string(self):
+        return '{%s}' % ','.join(map(str,sweep_set_iter(self.val)))
+
+class SegmentPrinter:
+    """Print a poly_ops::detail::segment instance"""
+    def __init__(self,val):
+        self.val = val
+    
+    def to_string(self):
+        return '{a=%i, b=%i}' % (int(self.val['a']),int(self.val['b']))
+
+class CachedSegmentPrinter:
+    """Print a poly_ops::detail::cached_segment instance"""
+    def __init__(self,val):
+        self.val = val
+    
+    def to_string(self):
+        pa = self.val['pa']['_data']
+        pb = self.val['pb']['_data']
+        return '{a=%i (%i,%i), b=%i (%i,%i)}' % (
+            int(self.val['a']),
+            int(pa[0]),
+            int(pa[1]),
+            int(self.val['b']),
+            int(pb[0]),
+            int(pb[1]))
+
 def build_pretty_printer():
     pp = gdb.printing.RegexpCollectionPrettyPrinter('polyops')
     pp.add_printer('point_t','^poly_ops::point_t<.*>$',PointPrinter)
+    pp.add_printer('sweep_set','^poly_ops::detail::sweep_set<.*>$',SweepSetPrinter)
+    pp.add_printer('segment','^poly_ops::detail::segment<.*>$',SegmentPrinter)
+    pp.add_printer('cached_segment','^poly_ops::detail::cached_segment<.*>$',CachedSegmentPrinter)
     return pp

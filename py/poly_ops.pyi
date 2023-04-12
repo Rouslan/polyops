@@ -31,6 +31,18 @@ def union_flat(
     casting: CastingKind = ...,
     dtype: DTypeLike = ...) -> tuple[PointArray,...]: ...
 
+def normalize_tree(
+    loops: Iterable[ArrayLike],
+    *,
+    casting: CastingKind = ...,
+    dtype: DTypeLike = ...) -> LoopTree: ...
+
+def normalize_flat(
+    loops: Iterable[ArrayLike],
+    *,
+    casting: CastingKind = ...,
+    dtype: DTypeLike = ...) -> tuple[PointArray,...]: ...
+
 def boolean_op_tree(
     subject: Iterable[ArrayLike],
     clip: Iterable[ArrayLike],

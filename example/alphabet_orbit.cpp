@@ -78,12 +78,12 @@ struct scene {
             offset[0] += 3000;
             offset[1] += 3000;
             for(auto &loop : shape.loops) {
-                clip.add_loop_subject(loop | std::views::transform([=](auto &p) { return p + offset; }));
+                clip.add_loops_subject(loop | std::views::transform([=](auto &p) { return p + offset; }));
             }
         }
 
         for(auto &loop : center_shape) {
-            clip.add_loop_clip(loop | std::views::transform([=](auto &p) { return p + poly_ops::point_t<coord_t>(3000,3000); }));
+            clip.add_loops_clip(loop | std::views::transform([=](auto &p) { return p + poly_ops::point_t<coord_t>(3000,3000); }));
         }
 
         auto loops = clip.execute<false>(operation);
