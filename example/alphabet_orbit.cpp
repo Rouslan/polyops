@@ -9,6 +9,8 @@
 #include <numbers>
 #include <chrono>
 
+#define SDL_MAIN_HANDLED
+
 #include "SDL.h"
 
 #include "../include/poly_ops/poly_ops.hpp"
@@ -45,7 +47,7 @@ struct orbit {
     vec3 b;
 
     poly_ops::point_t<coord_t> operator()(double delta) const {
-        auto r = vadd(vmul(a,std::sin(delta)),vmul(b,std::cos(delta)));
+        auto r = vadd(vmul(a,static_cast<float>(std::sin(delta))),vmul(b,static_cast<float>(std::cos(delta))));
         return {static_cast<coord_t>(r[0]),static_cast<coord_t>(r[1])};
     }
 };

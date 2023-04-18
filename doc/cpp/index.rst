@@ -124,7 +124,7 @@ with fewer than three points are silently discarded.
 Custom Point Type in Input
 -------------------------------
 
-By default, given a type `T`, `point_t<T>`, `T[2]` and `std::span<T,2>` satisfy
+By default, given a type `T`: `point_t<T>`, `T[2]` and `std::span<T,2>` satisfy
 :cpp:concept:`point`. To use your own point type in the input instead of one of
 the above, specialize :cpp:class:`point_ops` like so:
 
@@ -227,7 +227,13 @@ be specialized to provide equivalent mathematical functions.
 Index Template Parameter
 --------------------------------
 
-`Index` template parameter
+The `Index` template parameter of the functions and classes of this library is
+the type that will represent the numeric indices of the points. By default, this
+is `std::size_t`. This library uses this type extensively in it's internal data
+structures, thus using a smaller type can save some memory; however, it must be
+large enough to represent the total number of points plus two times the number
+of intersections, of a single operation. Unlike `Coord`, this must be one of the
+built-in integers.
 
 
 Reference

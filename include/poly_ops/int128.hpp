@@ -164,7 +164,7 @@ public:
     basic_int128(unsigned __int64 b) noexcept : _lo(b), _hi(0) {}
     basic_int128(detail::small_sints auto b) noexcept : basic_int128(static_cast<__int64>(b)) {}
     basic_int128(detail::small_uints auto b) noexcept : basic_int128(static_cast<unsigned __int64>(b)) {}
-    explicit basic_int128(std::floating_point auto b) noexcept
+    template<std::floating_point T> explicit basic_int128(T b) noexcept
         : _lo(static_cast<unsigned __int64>(static_cast<__int64>(std::fmod(b,T(0x1p64))))),
           _hi(static_cast<unsigned __int64>(static_cast<__int64>(b/T(0x1p64)))) {}
     basic_int128(const basic_int128&) noexcept = default;
@@ -202,7 +202,6 @@ public:
         return std::ldexp(static_cast<T>(static_cast<__int64>(_hi)),64)
             + static_cast<T>(static_cast<__int64>(_lo));
     }
-    template<detail::builtin_number T> explicit operator T() const noexcept { return static_cast<T>(base); }
 
     explicit operator bool() const noexcept {
         return _lo != 0 || _hi != 0;
@@ -307,7 +306,7 @@ public:
         return a._lo == b._lo && a._hi == b._hi;
     }
     friend bool operator==(basic_int128 a,__int64 b) noexcept {
-        return a._lo == b && a._hi == (b >> 63);
+        return a._lo == static_cast<unsigned __int64>(b) && static_cast<__int64>(a._hi) == (b >> 63);
     }
     friend bool operator==(basic_int128 a,unsigned __int64 b) noexcept {
         return a._hi == 0 && a._lo == b;
@@ -328,7 +327,7 @@ public:
             &x) != 0;
     }
     friend bool operator<(basic_int128 a,__int64 b) noexcept {
-        __int64 x;
+        unsigned __int64 x;
         return _subborrow_u64(
             _subborrow_u64(0,a._lo,static_cast<unsigned __int64>(b),&x),
             a._hi,
@@ -336,7 +335,7 @@ public:
             &x) != 0;
     }
     friend bool operator<(basic_int128 a,unsigned __int64 b) noexcept {
-        __int64 x;
+        unsigned __int64 x;
         return _subborrow_u64(
             _subborrow_u64(0,a._lo,b,&x),
             a._hi,
@@ -346,17 +345,14 @@ public:
     friend bool operator<(basic_int128 a,detail::small_sints auto b) noexcept {
         return a < static_cast<__int64>(b);
     }
-    friend bool operator==(basic_int128 a,detail::small_uints auto b) noexcept {
-        return a < static_cast<unsigned __int64>(b);
-    }
 
-    unsigned __int64 lo() const noexcept { return lo; }
-    unsigned __int64 hi() const noexcept { return hi; }
+    unsigned __int64 lo() const noexcept { return _lo; }
+    unsigned __int64 hi() const noexcept { return _hi; }
 
     static basic_int128 mul(__int64 a,__int64 b) noexcept {
-        basic_int128 r;
-        r._lo = _mul128(a,b,&r._hi);
-        return r;
+        __int64 hi, lo;
+        lo = _mul128(a,b,&hi);
+        return {static_cast<unsigned __int64>(hi),static_cast<unsigned __int64>(lo)};
     }
 
     static basic_int128 mul(unsigned __int64 a,unsigned __int64 b) noexcept {

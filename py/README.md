@@ -6,6 +6,9 @@ Boolean and inset/outset operations on polygons with integer coordinates.
 **Notice:** This is a work in progress. Some features might not work and the
 interface may change drastically between versions.
 
+[Documentation](https://rouslan.github.io/polyops/py/index.html) |
+[C++ Version](https://github.com/Rouslan/polyops)
+
 Basic usage:
 ```python
 loop_a = [

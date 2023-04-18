@@ -9,6 +9,9 @@ interface may change drastically between versions. If you are looking for a
 mature library, I recommend
 [Clipper2](https://github.com/AngusJohnson/Clipper2).
 
+[Documentation](https://rouslan.github.io/polyops/cpp/index.html) |
+[Python Binding](https://github.com/Rouslan/polyops/tree/master/py)
+
 Basic usage:
 ```c++
 using namespace poly_ops;

@@ -1386,7 +1386,7 @@ public:
     std::conditional_t<EmitIndex,indexed_point_t<Coord,Index>,const point_t<Coord>&>
     operator*() const noexcept(std::is_nothrow_copy_constructible_v<Coord> || !EmitIndex) {
         if constexpr(EmitIndex) return {i,lpoints[i].data};
-        return lpoints[i].data;
+        else return lpoints[i].data;
     }
 
     friend bool operator==(const proto_loop_iterator &a,const proto_loop_iterator &b) noexcept {
@@ -1811,7 +1811,7 @@ Index clipper<Coord,Index>::split_segment(
 
     if(!segment<Index>(sa,sb).a_is_main(lpoints)) std::swap(sa,sb);
 
-    Index mid = lpoints.size();
+    Index mid = static_cast<Index>(lpoints.size());
     lpoints[sa].next = mid;
     lpoints.emplace_back(c,sb,lpoints[sa].bset());
     POLY_OPS_ASSERT(lpoints[sa].bset() == lpoints[sb].bset());

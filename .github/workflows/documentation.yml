@@ -26,17 +26,17 @@ jobs:
         uses: actions/checkout@v3
         with:
           path: repo/polyops
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-          #cache: 'pip'
-          #cache-dependency-path: '**/package-lock.json'
       - name: Checkout Customized Sphinx
         uses: actions/checkout@v3
         with:
           repository: Rouslan/sphinx
           path: repo/sphinx
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: 'repo/sphinx/package-lock.json'
       - name: Install Sphinx
         run: python -m pip install repo/sphinx
       - name: Run Sphinx

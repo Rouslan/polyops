@@ -8,6 +8,7 @@ find_package(SDL2 REQUIRED)
 
 if (MSVC)
     add_compile_options(/W4)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 else()
     add_compile_options(-Wall -Wextra -pedantic)
 endif()
