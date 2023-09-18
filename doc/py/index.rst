@@ -38,12 +38,12 @@ Getting the results as a hierarchy instead of a flat list:
     def print_polygon(poly,level=0):
         indent = '  '*level
         for p in poly[0]:
-            print(f"${indent}${p[0]},${p[1]}")
+            print(f"{indent}{p[0]},{p[1]}")
 
         print()
 
         if poly[1]:
-            print(f"${indent}nested polygons:")
+            print(f"{indent}nested polygons:")
             for child in poly[1]: print_polygon(child,level+1);
 
     ...

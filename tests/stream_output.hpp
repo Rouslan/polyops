@@ -12,6 +12,10 @@ poly_ops.hpp is always "coord_t" and Index is always "index_t".
 
 #include "../include/poly_ops/base.hpp"
 
+template<typename T> inline std::ostream &operator<<(std::ostream &os,const poly_ops::point_t<T> &x) {
+    return os << '{' << x.x() << ',' << x.y() << '}';
+}
+
 /*
 template<typename T> struct _pp_type {};
 template<typename T> inline _pp_type<T> pp_type;
@@ -181,13 +185,13 @@ template<typename T> std::ostream &operator<<(std::ostream &os,const _pp<T> &x) 
     return os;
 }
 
-template<typename R> void write_loops(std::ostream &os,R &&loops) {
+template<typename Coord,typename R> void write_loops(std::ostream &os,R &&loops) {
     bool first = true;
     for(auto &&loop : loops) {
         if(!first) os << "===\n";
         first = false;
         for(auto &&raw_p : loop) {
-            poly_ops::point_t<coord_t> p(raw_p);
+            poly_ops::point_t<Coord> p(raw_p);
             os << p[0] << ' ' << p[1] << '\n';
         }
     }
@@ -200,7 +204,7 @@ void odd_coord_count() {
 struct stream_exceptions_saver {
     std::ios &ios;
     std::ios_base::iostate state;
-    
+
     stream_exceptions_saver(std::ios &ios) : ios(ios), state(ios.exceptions()) {}
     ~stream_exceptions_saver() {
         ios.exceptions(state);
@@ -210,7 +214,7 @@ struct stream_exceptions_saver {
 template<typename Coord> void read_loops(std::istream &is,std::vector<std::vector<poly_ops::point_t<Coord>>> &loops) {
     loops.emplace_back();
     poly_ops::point_t<Coord> p;
-    int c_count = 0;
+    unsigned int c_count = 0;
 
     stream_exceptions_saver ses(is);
 

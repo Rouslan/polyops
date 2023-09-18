@@ -91,16 +91,16 @@ template<typename T> struct point_ops<std::span<T,2>> {
 
 namespace detail {
 template<typename T> concept arithmetic = requires(T x) {
-    { x + x } -> std::same_as<T>;
-    { x - x } -> std::same_as<T>;
-    { -x } -> std::same_as<T>;
+    { x + x } -> std::convertible_to<T>;
+    { x - x } -> std::convertible_to<T>;
+    { -x } -> std::convertible_to<T>;
 };
 template<typename Lesser,typename Greater>
 concept arithmetic_promotes = requires(Lesser a,Greater b) {
-    { a + b } -> std::same_as<Greater>;
-    { b + a } -> std::same_as<Greater>;
-    { a - b } -> std::same_as<Greater>;
-    { b - a } -> std::same_as<Greater>;
+    { a + b } -> std::convertible_to<Greater>;
+    { b + a } -> std::convertible_to<Greater>;
+    { a - b } -> std::convertible_to<Greater>;
+    { b - a } -> std::convertible_to<Greater>;
 };
 } // namespace detail
 
@@ -130,10 +130,10 @@ template<typename T> concept coordinate =
         { coord_ops<T>::to_coord(cr) } -> std::same_as<T>;
         { coord_ops<T>::pi() } -> std::same_as<real_coord_t<T>>;
         { coord_ops<T>::mul(c,c) } -> std::same_as<long_coord_t<T>>;
-        { cr * cr } -> std::same_as<real_coord_t<T>>;
-        { cr / cr } -> std::same_as<real_coord_t<T>>;
-        { c * cr } -> std::same_as<real_coord_t<T>>;
-        { cr * c } -> std::same_as<real_coord_t<T>>;
+        { cr * cr } -> std::convertible_to<real_coord_t<T>>;
+        { cr / cr } -> std::convertible_to<real_coord_t<T>>;
+        { c * cr } -> std::convertible_to<real_coord_t<T>>;
+        { cr * c } -> std::convertible_to<real_coord_t<T>>;
     };
 
 
@@ -207,32 +207,38 @@ template<typename T> struct point_ops<point_t<T>> {
 };
 
 template<typename T,typename U>
-constexpr point_t<decltype(std::declval<T>()+std::declval<U>())> operator+(const point_t<T> &a,const point_t<U> &b) {
-    return {a[0]+b[0],a[1]+b[1]};
+constexpr point_t<std::common_type_t<T,U>> operator+(const point_t<T> &a,const point_t<U> &b) {
+    using Tr = std::common_type_t<T,U>;
+    return {static_cast<Tr>(a[0]+b[0]),static_cast<Tr>(a[1]+b[1])};
 }
 
 template<typename T,typename U>
-constexpr point_t<decltype(std::declval<T>()-std::declval<U>())> operator-(const point_t<T> &a,const point_t<U> &b) {
-    return {a[0]-b[0],a[1]-b[1]};
+constexpr point_t<std::common_type_t<T,U>> operator-(const point_t<T> &a,const point_t<U> &b) {
+    using Tr = std::common_type_t<T,U>;
+    return {static_cast<Tr>(a[0]-b[0]),static_cast<Tr>(a[1]-b[1])};
 }
 
 template<typename T,typename U>
-constexpr point_t<decltype(std::declval<T>()*std::declval<U>())> operator*(const point_t<T> &a,const point_t<U> &b) {
-    return {a[0]*b[0],a[1]*b[1]};
+constexpr point_t<std::common_type_t<T,U>> operator*(const point_t<T> &a,const point_t<U> &b) {
+    using Tr = std::common_type_t<T,U>;
+    return {static_cast<Tr>(a[0]*b[0]),static_cast<Tr>(a[1]*b[1])};
 }
 
 template<typename T,typename U>
-constexpr point_t<decltype(std::declval<T>()/std::declval<U>())> operator/(const point_t<T> &a,const point_t<U> &b) {
-    return {a[0]/b[0],a[1]/b[1]};
+constexpr point_t<std::common_type_t<T,U>> operator/(const point_t<T> &a,const point_t<U> &b) {
+    using Tr = std::common_type_t<T,U>;
+    return {static_cast<Tr>(a[0]/b[0]),static_cast<Tr>(a[1]/b[1])};
 }
 
 template<typename T,typename U>
-constexpr point_t<decltype(std::declval<T>()*std::declval<U>())> operator*(const point_t<T> &a,U b) {
-    return {a[0]*b,a[1]*b};
+constexpr point_t<std::common_type_t<T,U>> operator*(const point_t<T> &a,U b) {
+    using Tr = std::common_type_t<T,U>;
+    return {static_cast<Tr>(a[0]*b),static_cast<Tr>(a[1]*b)};
 }
 template<typename T,typename U>
-constexpr point_t<decltype(std::declval<T>()*std::declval<U>())> operator*(T a,const point_t<U> &b) {
-    return {a*b[0],a*b[1]};
+constexpr point_t<std::common_type_t<T,U>> operator*(T a,const point_t<U> &b) {
+    using Tr = std::common_type_t<T,U>;
+    return {static_cast<Tr>(a*b[0]),static_cast<Tr>(a*b[1])};
 }
 
 template<typename T>

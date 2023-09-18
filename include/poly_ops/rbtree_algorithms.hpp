@@ -34,7 +34,7 @@ follows: */
 namespace poly_ops::detail {
 
 inline std::size_t floor_log2(std::size_t n) {
-   return sizeof(std::size_t)*8 - std::size_t(1) - std::countl_zero(n);
+   return sizeof(std::size_t)*8 - std::size_t(1) - std::size_t(std::countl_zero(n));
 }
 
 template <class NodePtr>

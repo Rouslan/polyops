@@ -1,0 +1,51 @@
+subject: [ 20  20 100  10 100 100  20 100]
+clip: [ 56 138  72  58 161 117]
+union: 0
+difference: 1
+intersection: 2
+xor: 3
+normalize: 4
+------
+subject: [ 20  21 207  34 199 151  16 135]
+clip: [ 48 114  51  40 157 128 164  67]
+union: 5
+difference: 6
+intersection: 7
+xor: 8
+normalize: 9
+------
+
+subject: [ 20  20 100  10 100 100  20 100]
+clip: [ 67  62  75 166 183  94]
+union: 10
+difference: 11
+intersection: 12
+xor: 13
+normalize: 14
+------
+subject: [ 72  10 173 177  10 126 156  60  35 197  49  46]
+union: 15
+difference: 16
+intersection: 17
+xor: 18
+normalize: 19
+------
+subject: [ 19  24 123  22 115 136  11 129]
+clip: [ 34  74  66  45 100  74  64 116]
+union: 20
+difference: 21
+intersection: 22
+xor: 23
+normalize: 24
+------
+subject: [ 27 114  17  59  65  15 138  23 157  83 133 129  70 141]
+subject: [123 210 118  98 245 120 213 192]
+subject: [203 141 159  16 309 163]
+clip: [ 55 105  97 209  96  55 212  88 183  22 165 172]
+clip: [ 19 186  67  67 188 170 109 247]
+union: 25
+difference: 26
+intersection: 27
+xor: 28
+normalize: 29
+------

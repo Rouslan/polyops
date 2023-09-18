@@ -41,8 +41,12 @@ setup(
         depends=[
             'include/poly_ops/poly_ops.hpp',
             'include/poly_ops/base.hpp',
-            'include/poly_ops/normalize.hpp',
+            'include/poly_ops/clip.hpp',
+            'include/poly_ops/int128.hpp',
             'include/poly_ops/offset.hpp',
             'include/poly_ops/strided_itr.hpp',
-            'include/poly_ops/mini_flat_set.hpp'])],
+            'include/poly_ops/mini_flat_set.hpp',
+            'include/poly_ops/rbtree_algorithms.hpp',
+            'include/poly_ops/sweep_set.hpp',
+            'py/common.pxd'])],
     zip_safe=True)

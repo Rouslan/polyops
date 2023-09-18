@@ -38,10 +38,10 @@ Concepts
             { coord_ops<T>::to_coord(cr) } -> std::same_as<T>;
             { coord_ops<T>::pi() } -> std::same_as<real_coord_t<T>>;
             { coord_ops<T>::mul(c,c) } -> std::same_as<long_coord_t<T>>;
-            { cr * cr } -> std::same_as<real_coord_t<T>>;
-            { cr / cr } -> std::same_as<real_coord_t<T>>;
-            { c * cr } -> std::same_as<real_coord_t<T>>;
-            { cr * c } -> std::same_as<real_coord_t<T>>;
+            { cr * cr } -> std::convertible_to<real_coord_t<T>>;
+            { cr / cr } -> std::convertible_to<real_coord_t<T>>;
+            { c * cr } -> std::convertible_to<real_coord_t<T>>;
+            { cr * c } -> std::convertible_to<real_coord_t<T>>;
         }
 
     where ``detail::arithmetic<typename T>`` is:
@@ -49,9 +49,9 @@ Concepts
     .. code-block:: cpp
 
         requires(T x) {
-            { x + x } -> std::same_as<T>;
-            { x - x } -> std::same_as<T>;
-            { -x } -> std::same_as<T>;
+            { x + x } -> std::convertible_to<T>;
+            { x - x } -> std::convertible_to<T>;
+            { -x } -> std::convertible_to<T>;
         }
 
     and ``detail::arithmetic_promotes<typename Lesser,typename Greater>`` is:
@@ -59,10 +59,10 @@ Concepts
     .. code-block:: cpp
 
         requires(Lesser a,Greater b) {
-            { a + b } -> std::same_as<Greater>;
-            { b + a } -> std::same_as<Greater>;
-            { a - b } -> std::same_as<Greater>;
-            { b - a } -> std::same_as<Greater>;
+            { a + b } -> std::convertible_to<Greater>;
+            { b + a } -> std::convertible_to<Greater>;
+            { a - b } -> std::convertible_to<Greater>;
+            { b - a } -> std::convertible_to<Greater>;
         }
 
 .. cpp:concept:: template<typename T,typename Coord> point
@@ -339,7 +339,7 @@ Functions
 ----------------
 
 .. cpp:function:: template<typename T,typename U>\
-    constexpr point_t<decltype(std::declval<T>()+std::declval<U>())>\
+    constexpr point_t<std::common_type_t<T,U>>\
     operator+(const point_t<T> &a,const point_t<U> &b)
 
     Element-wise addition.
@@ -347,7 +347,7 @@ Functions
     Equivalent to :cpp:expr:`point_t{a[0]+b[0],a[1]+b[1]}`
 
 .. cpp:function:: template<typename T,typename U>\
-    constexpr point_t<decltype(std::declval<T>()-std::declval<U>())>\
+    constexpr point_t<std::common_type_t<T,U>>\
     operator-(const point_t<T> &a,const point_t<U> &b)
 
     Element-wise subtraction.
@@ -355,7 +355,7 @@ Functions
     Equivalent to :cpp:expr:`point_t{a[0]-b[0],a[1]-b[1]}`
 
 .. cpp:function:: template<typename T,typename U>\
-    constexpr point_t<decltype(std::declval<T>()*std::declval<U>())>\
+    constexpr point_t<std::common_type_t<T,U>>\
     operator*(const point_t<T> &a,const point_t<U> &b)
 
     Element-wise multiplication.
@@ -363,7 +363,7 @@ Functions
     Equivalent to :cpp:expr:`point_t{a[0]*b[0],a[1]*b[1]}`
 
 .. cpp:function:: template<typename T,typename U>\
-    constexpr point_t<decltype(std::declval<T>()*std::declval<U>())>\
+    constexpr point_t<std::common_type_t<T,U>>\
     operator*(const point_t<T> &a,U b)
     :nocontentsentry:
 
@@ -372,7 +372,7 @@ Functions
     Equivalent to :cpp:expr:`point_t{a[0]*b,a[1]*b}`
 
 .. cpp:function:: template<typename T,typename U>\
-    constexpr point_t<decltype(std::declval<T>()*std::declval<U>())>\
+    constexpr point_t<std::common_type_t<T,U>>\
     operator*(T a,const point_t<U> &b)
     :nocontentsentry:
 
@@ -381,7 +381,7 @@ Functions
     Equivalent to :cpp:expr:`point_t{a*b[0],a*b[1]}`
 
 .. cpp:function:: template<typename T,typename U>\
-    constexpr point_t<decltype(std::declval<T>()/std::declval<U>())>\
+    constexpr point_t<std::common_type_t<T,U>>\
     operator/(const point_t<T> &a,const point_t<U> &b)
 
     Element-wise division.

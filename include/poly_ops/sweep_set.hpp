@@ -5,6 +5,7 @@
 #include <vector>
 #include <limits>
 #include <cassert>
+#include <concepts>
 
 #include "rbtree_algorithms.hpp"
 
@@ -14,7 +15,10 @@ namespace poly_ops::detail {
 enum class color_t {black,red};
 
 template<typename T,typename Index> struct set_node {
-    Index parent;
+    Index parent
+#ifndef NDEBUG
+        = std::numeric_limits<Index>::max();
+#endif
     Index left;
     Index right;
     color_t color;
@@ -38,21 +42,21 @@ struct offset_ptr_base {
 template<typename T>
 struct offset_ptr_base<T,void> {};
 
-template<typename T,typename Index,typename Base> struct offset_ptr : offset_ptr_base<offset_ptr<T,Index,Base>,T> {
+template<typename T,typename Index,typename Vec> struct offset_ptr : offset_ptr_base<offset_ptr<T,Index,Vec>,T> {
     using element_type = T;
 
     static constexpr Index NIL = std::numeric_limits<Index>::max();
 
-    std::pmr::vector<set_node<Base,Index>> *vec;
+    Vec *vec;
     Index i;
 
     offset_ptr() noexcept : vec(nullptr), i(NIL) {}
-    offset_ptr(std::pmr::vector<set_node<Base,Index>> *vec,Index i) noexcept : vec(vec), i(i) {}
+    offset_ptr(Vec *vec,Index i) noexcept : vec(vec), i(i) {}
     template<typename U> requires std::is_convertible_v<U*,T*>
-    offset_ptr(offset_ptr<U,Index,Base> b) noexcept : vec(b.vec), i(b.i)  {}
+    offset_ptr(offset_ptr<U,Index,Vec> b) noexcept : vec(b.vec), i(b.i)  {}
 
     template<typename U> requires std::is_convertible_v<U*,T*>
-    offset_ptr &operator=(offset_ptr<U,Index,Base> b) noexcept {
+    offset_ptr &operator=(offset_ptr<U,Index,Vec> b) noexcept {
         vec = b.vec;
         i = b.i;
         return *this;
@@ -72,7 +76,7 @@ template<typename T,typename Index,typename Base> struct offset_ptr : offset_ptr
         return a.i <=> b.i;
     }
 
-    template<typename U> using rebind = offset_ptr<U,Index,Base>;
+    template<typename U> using rebind = offset_ptr<U,Index,Vec>;
 
     template<typename UPtr>
     requires requires(UPtr::element_type *x) { const_cast<T*>(x); }
@@ -81,20 +85,20 @@ template<typename T,typename Index,typename Base> struct offset_ptr : offset_ptr
     }
 
     auto unconst() const {
-        return offset_ptr<std::remove_const_t<T>,Index,Base>(vec,i);
+        return offset_ptr<std::remove_const_t<T>,Index,Vec>(vec,i);
     }
 };
 
-template<typename Index,typename Base>
-using set_node_ptr = offset_ptr<set_node<Base,Index>,Index,Base>;
+template<typename Index,typename Base,typename Vec>
+using set_node_ptr = offset_ptr<set_node<Base,Index>,Index,Vec>;
 
-template<typename Index,typename Base>
-using const_set_node_ptr = offset_ptr<const set_node<Base,Index>,Index,Base>;
+template<typename Index,typename Base,typename Vec>
+using const_set_node_ptr = offset_ptr<const set_node<Base,Index>,Index,Vec>;
 
-template<typename Index,typename Base> struct _node_traits {
+template<typename Index,typename Base,typename Vec> struct _node_traits {
     using node = set_node<Base,Index>;
-    using node_ptr = offset_ptr<node,Index,Base>;
-    using const_node_ptr = offset_ptr<const node,Index,Base>;
+    using node_ptr = offset_ptr<node,Index,Vec>;
+    using const_node_ptr = offset_ptr<const node,Index,Vec>;
     using color = color_t;
     static node_ptr get_parent(const_node_ptr n) noexcept { return {n.vec,n->parent}; }
     static void set_parent(node_ptr n, node_ptr parent) noexcept { n->parent = parent.i; }
@@ -108,17 +112,17 @@ template<typename Index,typename Base> struct _node_traits {
     static constexpr color red() noexcept { return color_t::red; }
 };
 
-template<typename Index,typename Base> struct _value_traits {
-    std::pmr::vector<set_node<Base,Index>> *vec;
+template<typename Index,typename Base,typename Vec> struct _value_traits {
+    Vec *vec;
 
-    using node_traits = _node_traits<Index,Base>;
+    using node_traits = _node_traits<Index,Base,Vec>;
     using node = node_traits::node;
     using node_ptr = node_traits::node_ptr;
     using const_node_ptr = node_traits::const_node_ptr;
     using value_type = node;
     using pointer = node*;
     using const_pointer = const node*;
-    
+
     node_ptr to_node_ptr(value_type &value) const noexcept {
         return {vec,static_cast<Index>(&value - vec->data())};
     }
@@ -133,13 +137,13 @@ template<typename Index,typename Base> struct _value_traits {
 };
 
 
-template<typename T,typename Index,typename Base>
+template<typename T,typename Index,typename Base,typename Vec=std::pmr::vector<set_node<Base,Index>>>
 class tree_iterator {
 public:
     // this needs to be non-const
-    using node_ptr = _node_traits<Index,Base>::node_ptr;
+    using node_ptr = _node_traits<Index,Base,Vec>::node_ptr;
 
-    using node_algo = rbtree_algorithms<_node_traits<Index,Base>>;
+    using node_algo = rbtree_algorithms<_node_traits<Index,Base,Vec>>;
 
     using iterator_category = std::bidirectional_iterator_tag;
     using difference_type = std::ptrdiff_t;
@@ -158,11 +162,14 @@ public:
     tree_iterator(const tree_iterator &other) = default;
 
     template<typename U> requires std::is_convertible_v<U*,T*>
-    tree_iterator(const tree_iterator<U,Index,Base> &b) : ptr(b.pointed_node()) {}
+    tree_iterator(const tree_iterator<U,Index,Base,Vec> &b) : ptr(b.pointed_node()) {}
 
     tree_iterator &operator=(const tree_iterator&) = default;
 
-    tree_iterator &operator=(node_ptr nodeptr) { ptr = nodeptr; }
+    tree_iterator &operator=(node_ptr nodeptr) {
+        ptr = nodeptr;
+        return *this;
+    }
 
     node_ptr pointed_node() const noexcept { return ptr; }
 
@@ -201,18 +208,18 @@ public:
     T *operator->() const { return ptr.get(); }
 
     auto unconst() const {
-        return tree_iterator<std::remove_const_t<T>,Index,Base>(ptr.unconst());
+        return tree_iterator<std::remove_const_t<T>,Index,Base,Vec>(ptr.unconst());
     }
 };
 
 /* A custom "set" class that doesn't store the header node of the red-black tree
 in itself. Instead, it is assumed to be the first element of "store". */
-template<typename T,typename Index,typename Compare> class sweep_set {
+template<typename T,typename Index,typename Compare,typename Vec=std::pmr::vector<set_node<T,Index>>> class sweep_set {
 public:
     using element_type = set_node<T,Index>;
-    using iterator = tree_iterator<element_type,Index,T>;
-    using const_iterator = tree_iterator<const element_type,Index,T>;
-    using value_traits = _value_traits<Index,T>;
+    using iterator = tree_iterator<element_type,Index,T,Vec>;
+    using const_iterator = tree_iterator<const element_type,Index,T,Vec>;
+    using value_traits = _value_traits<Index,T,Vec>;
     using node_traits = value_traits::node_traits;
     using node_ptr = value_traits::node_ptr;
     using const_node_ptr = value_traits::const_node_ptr;
@@ -239,7 +246,12 @@ public:
         }
     };
 
-    sweep_set(std::pmr::vector<set_node<T,Index>> &store,Compare &&cmp={})
+    node_ptr to_node_ptr(node_ptr x) const noexcept { return x; }
+    static node_ptr to_node_ptr(const_iterator itr) noexcept { return itr.pointed_node(); }
+    node_ptr to_node_ptr(element_type &value) const noexcept { return traits_val.to_node_ptr(value); }
+    node_ptr to_node_ptr(Index i) const noexcept { return traits_val.to_node_ptr(i); }
+
+    sweep_set(Vec &store,Compare &&cmp={})
         : traits_val{&store}, compare{std::forward<Compare>(cmp)}
     {
         assert(store.size());
@@ -250,46 +262,16 @@ public:
         node_algo::init_header(header_ptr());
     }
 
-    iterator erase(const_iterator i) noexcept {
-        const_iterator r(i);
-        ++r;
-        node_algo::erase(header_ptr(),i.pointed_node());
-        return r.unconst();
+    template<typename U> iterator erase(U &&pos) noexcept {
+        return _erase(to_node_ptr(pos));
     }
 
-    iterator erase(element_type &value) noexcept {
-        return erase(traits_val.to_node_ptr(value));
+    template<typename U> std::pair<iterator,bool> insert(U &&pos) {
+        return _insert(to_node_ptr(pos));
     }
 
-    iterator erase(Index i) noexcept {
-        return erase(traits_val.to_node_ptr(i));
-    }
-
-    iterator erase(node_ptr ptr) noexcept {
-        const_iterator r(ptr);
-        ++r;
-        node_algo::erase(header_ptr(),ptr);
-        return r.unconst();
-    }
-
-    std::pair<iterator,bool> insert(element_type &value) {
-        return insert(traits_val.to_node_ptr(value));
-    }
-
-    std::pair<iterator,bool> insert(Index i) {
-        return insert(traits_val.to_node_ptr(i));
-    }
-
-    std::pair<iterator,bool> insert(node_ptr ptr) {
-        typename node_algo::insert_commit_data commit_data;
-        std::pair<node_ptr,bool> ret = node_algo::insert_unique_check(
-            header_ptr(),
-            ptr,
-            compare,
-            commit_data);
-        return std::pair<iterator,bool>(
-            ret.second ? insert_unique_commit(ptr,commit_data) : iterator(ret.first),
-            ret.second);
+    template<typename Pos,typename Value> iterator insert_before(Pos pos,Value value) noexcept {
+        return _insert_before(to_node_ptr(pos),to_node_ptr(value));
     }
 
     bool empty() const noexcept {
@@ -347,18 +329,48 @@ public:
     }
 
     const Compare &key_comp() const noexcept { return compare.base_cmp; }
+    Compare &key_comp() noexcept { return compare.base_cmp; }
     const cmp_wrapper &node_comp() const noexcept { return compare; }
 
 private:
     node_ptr header_ptr() noexcept { return {traits_val.vec,0}; }
     const_node_ptr header_ptr() const noexcept { return {traits_val.vec,0}; }
 
+    iterator _erase(node_ptr ptr) noexcept {
+        iterator r(ptr);
+        ++r;
+        node_algo::erase(header_ptr(),ptr);
+#ifndef NDEBUG
+        ptr->parent = node_ptr::NIL;
+#endif
+        return r;
+    }
+
+    std::pair<iterator,bool> _insert(node_ptr ptr) {
+        assert(node_algo::unique(ptr));
+
+        typename node_algo::insert_commit_data commit_data;
+        std::pair<node_ptr,bool> ret = node_algo::insert_unique_check(
+            header_ptr(),
+            ptr,
+            compare,
+            commit_data);
+        return std::pair<iterator,bool>(
+            ret.second ? insert_unique_commit(ptr,commit_data) : iterator(ret.first),
+            ret.second);
+    }
+
+    iterator _insert_before(node_ptr pos,node_ptr value) noexcept {
+        assert(node_algo::unique(value));
+        return iterator(node_algo::insert_before(header_ptr(),pos,value));
+    }
+
     iterator insert_unique_commit(node_ptr ptr,const typename node_algo::insert_commit_data &commit_data) noexcept {
         node_algo::insert_unique_commit(header_ptr(),ptr,commit_data);
         return iterator(ptr);
     }
 
-    _value_traits<Index,T> traits_val;
+    _value_traits<Index,T,Vec> traits_val;
     [[no_unique_address]] cmp_wrapper compare;
 };
 

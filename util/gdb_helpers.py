@@ -29,7 +29,7 @@ class Plotter(gdb.Command):
     def __init__(self):
         super().__init__('plot_lpoints',gdb.COMMAND_DATA,gdb.COMPLETE_SYMBOL)
         self.proc = None
-    
+
     def invoke(self,argument,from_tty):
         if not argument: raise gdb.GdbError('an argument is required')
 
@@ -41,7 +41,7 @@ class Plotter(gdb.Command):
 
         if self.proc is None or self.proc.poll() is not None:
             self.proc = subprocess.Popen([sys.executable,PLOTTER],stdin=subprocess.PIPE,text=True)
-        
+
         json.dump(points,self.proc.stdin)
         self.proc.stdin.write('\n')
         self.proc.stdin.flush()
@@ -50,7 +50,7 @@ class PointPrinter:
     """Print a poly_ops::point_t instance"""
     def __init__(self,val):
         self.val = val
-    
+
     def to_string(self):
         data = self.val['_data']
         return '{%i,%i}' % (int(data[0]),int(data[1]))
@@ -60,14 +60,14 @@ class SweepSetIter:
         self.nodes = nodes
         self.n = n
         self.nil = nil
-    
+
     def __iter__(self):
         return self
-    
+
     def __next__(self):
         if int(self.n) == 0:
             raise StopIteration
-        
+
         node_obj = self.nodes[self.n]
         value = node_obj['value']
 
@@ -102,10 +102,10 @@ class SweepSetPrinter:
     """Print a poly_ops::detail::sweep_set instance"""
     def __init__(self,val):
         self.val = val
-    
+
     def __iter__(self):
         return enumerate(sweep_set_iter(self.val))
-    
+
     def to_string(self):
         return '{%s}' % ','.join(map(str,sweep_set_iter(self.val)))
 
@@ -113,7 +113,7 @@ class SegmentPrinter:
     """Print a poly_ops::detail::segment instance"""
     def __init__(self,val):
         self.val = val
-    
+
     def to_string(self):
         return '{a=%i, b=%i}' % (int(self.val['a']),int(self.val['b']))
 
@@ -121,7 +121,7 @@ class CachedSegmentPrinter:
     """Print a poly_ops::detail::cached_segment instance"""
     def __init__(self,val):
         self.val = val
-    
+
     def to_string(self):
         pa = self.val['pa']['_data']
         pb = self.val['pb']['_data']
@@ -133,10 +133,29 @@ class CachedSegmentPrinter:
             int(pb[0]),
             int(pb[1]))
 
+class CompoundIntPrinter:
+    """Print a poly_ops_new::compound_xint instance"""
+    def __init__(self,val):
+        self.val = val
+    
+    def to_string(self):
+        wcount = int(self.val.type.template_argument(0))
+        signed = bool(self.val.type.template_argument(1))
+        data = self.val['_data']
+        wsize = data.type.target().sizeof
+        value = 0
+        for i in range(wcount-1,-1,-1):
+            value <<= wsize*8
+            value |= int(data[i])
+        if signed and (int(data[wcount-1]) >> (wsize*8-1)):
+            value = -((1 << (wsize*8*wcount)) - value)
+        return str(value)
+
 def build_pretty_printer():
     pp = gdb.printing.RegexpCollectionPrettyPrinter('polyops')
     pp.add_printer('point_t','^poly_ops::point_t<.*>$',PointPrinter)
     pp.add_printer('sweep_set','^poly_ops::detail::sweep_set<.*>$',SweepSetPrinter)
-    pp.add_printer('segment','^poly_ops::detail::segment<.*>$',SegmentPrinter)
-    pp.add_printer('cached_segment','^poly_ops::detail::cached_segment<.*>$',CachedSegmentPrinter)
+    pp.add_printer('segment','^poly(_ops|draw)::detail::segment(<.*>)?$',SegmentPrinter)
+    pp.add_printer('cached_segment','^poly(_ops|draw)::detail::cached_segment<.*>$',CachedSegmentPrinter)
+    pp.add_printer('compound_xint','^poly_ops_new::compound_xint<.*>$',CompoundIntPrinter)
     return pp

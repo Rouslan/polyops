@@ -2,8 +2,10 @@
 #distutils: language = c++
 
 cimport cython
+from libc.stdlib cimport malloc, free
 import numpy as np
 cimport numpy as np
+cimport common
 
 
 np.import_array()
@@ -11,7 +13,6 @@ np.import_array()
 cdef extern from *:
     """
     #include <cstddef>
-    #include <cstdint>
     #include <cassert>
     #include <type_traits>
     #include <limits>
@@ -19,90 +20,12 @@ cdef extern from *:
     #include <poly_ops/poly_ops.hpp>
 
 
-    #if POLY_OPS_HAVE_128BIT_INT
-    using coord_t = std::int64_t;
-    constexpr inline int COORD_T_NPY = NPY_INT64;
-    #else
-    using coord_t = std::int32_t;
-    constexpr inline int COORD_T_NPY = NPY_INT32;
-    #endif
-
     using temp_poly_tree_range = poly_ops::temp_polygon_tree_range<coord_t>;
     using temp_poly_range = poly_ops::temp_polygon_range<coord_t>;
     using temp_poly_proxy = poly_ops::temp_polygon_proxy<coord_t>;
     using temp_poly_proxy_child_range = decltype(std::declval<temp_poly_proxy>().inner_loops());
     using clipper = poly_ops::clipper<coord_t>;
     using long_coord_t = poly_ops::long_coord_t<coord_t>;
-
-
-    struct npy_iterator {
-        NpyIter *itr;
-        NpyIter_IterNextFunc *itr_next;
-        char **data_ptr;
-        npy_intp *stride_ptr;
-        npy_intp *inner_size_ptr;
-
-        char *data;
-        npy_intp stride;
-        const char *run_end;
-
-        npy_iterator(PyArrayObject *ar,int flag,NPY_CASTING casting) : itr{nullptr}, itr_next{nullptr}
-        {
-            auto dtype = PyArray_DescrFromType(COORD_T_NPY);
-            if(NPY_UNLIKELY(!dtype)) return;
-            itr = NpyIter_New(
-                ar,
-                flag | NPY_ITER_REFS_OK | NPY_ITER_COPY | NPY_ITER_EXTERNAL_LOOP,
-                NPY_CORDER,
-                casting,
-                dtype);
-            Py_DECREF(dtype);
-            if(NPY_UNLIKELY(!itr)) return;
-
-            itr_next = NpyIter_GetIterNext(itr,nullptr);
-            if(NPY_UNLIKELY(!itr_next)) return;
-
-            data_ptr = NpyIter_GetDataPtrArray(itr);
-            stride_ptr = NpyIter_GetInnerStrideArray(itr);
-            inner_size_ptr = NpyIter_GetInnerLoopSizePtr(itr);
-
-            read_pointers();
-        }
-        npy_iterator(const npy_iterator&) = delete;
-        ~npy_iterator() { if(itr) NpyIter_Deallocate(itr); }
-
-        npy_iterator &operator=(const npy_iterator&) = delete;
-
-        explicit operator bool() const {
-            return itr_next != nullptr;
-        }
-
-        void read_pointers() {
-            data = *data_ptr;
-            stride = *stride_ptr;
-            run_end = data + *inner_size_ptr * stride;
-        }
-
-        bool next_check() {
-            data += stride;
-            if(data == run_end) {
-                if(!(*itr_next)(itr)) return false;
-                read_pointers();
-            }
-            return true;
-        }
-
-        void next() {
-        #ifdef NDEBUG
-            next_check();
-        #else
-            bool more = next_check();
-            assert(more);
-        #endif
-        }
-
-        coord_t &item() { return *reinterpret_cast<coord_t*>(data); }
-    };
 
     PyObject *poly_proxy_to_py(const temp_poly_proxy &x,PyArray_Descr *dtype) noexcept {
         npy_intp dims[2] = {static_cast<npy_intp>(x.size()),2};
@@ -180,13 +103,6 @@ cdef extern from *:
         PyErr_SetString(PyExc_RuntimeError,"unexpected exception thrown by poly_ops");
         return nullptr;
     }
-
-    class gil_unlocker {
-        PyThreadState *state;
-    public:
-        gil_unlocker() : state(PyEval_SaveThread()) {}
-        ~gil_unlocker() { PyEval_RestoreThread(state); }
-    };
 
     /* Cython 0.29 doesn't work with enum class */
     enum _bool_op {
@@ -282,7 +198,7 @@ cdef extern from *:
         long_coord_t result = sink.close();
 
     #if POLY_OPS_HAVE_128BIT_INT
-        
+
     #if NPY_BYTE_ORDER == NPY_LITTLE_ENDIAN
         std::uint64_t bits[2] = {result.lo(),result.hi()};
         const int little_endian = 1;
@@ -295,7 +211,7 @@ cdef extern from *:
     #else
 
         return pylong_from_(result);
-        
+
     #endif
     }
 
@@ -304,13 +220,6 @@ cdef extern from *:
         if(PyArray_DescrConverter2(obj,&r) == NPY_FAIL) return nullptr;
         if(r == nullptr) Py_RETURN_NONE;
         return reinterpret_cast<PyObject*>(r);
-    }
-
-    int _casting_converter(PyObject *obj,NPY_CASTING *casting) noexcept {
-        /* PyArray_CastingConverter will leave "casting" unchanged if "obj" is
-        None */
-        *casting = NPY_SAME_KIND_CASTING;
-        return PyArray_CastingConverter(obj,casting);
     }
     """
     const int COORD_T_NPY
@@ -321,11 +230,11 @@ cdef extern from *:
         xor "BOOL_OP_XOR",
         difference "BOOL_OP_DIFFERENCE"
         normalize "BOOL_OP_NORMALIZE"
-    
+
     cpdef enum BoolSet "_bool_set":
         subject "BOOL_SET_SUBJECT",
         clip "BOOL_SET_CLIP"
-    
+
     cppclass clipper:
         void reset()
 
@@ -335,25 +244,16 @@ cdef extern from *:
 
     object obj_to_dtype_opt(object)
 
-    const int NPY_FAIL
-
     np.dtype PyArray_PromoteTypes(np.dtype,np.dtype)
-    int _casting_converter(object,np.NPY_CASTING*) except NPY_FAIL
-    int PyArray_OrderConverter(object,np.NPY_ORDER*) except NPY_FAIL
+    int PyArray_OrderConverter(object,np.NPY_ORDER*) except common.NPY_FAIL
     bint PyArray_CanCastTypeTo(np.dtype,np.dtype,np.NPY_CASTING)
 
-
-cdef to_array(x):
-    ar = <np.ndarray>np.PyArray_FROM_O(x)
-    if ar.ndim != 2 or ar.shape[1] != 2:
-        raise TypeError('input array must have two dimensions, with the second dimension having a size of two')
-    return ar
 
 cdef load_loop(clipper &c,loop,BoolSet bset,common_dtype,np.NPY_CASTING casting):
     cdef np.ndarray ar
     cdef np.dtype r
 
-    ar = to_array(loop)
+    ar = common.to_array(loop)
     if common_dtype is None:
         r = ar.descr
     else:
@@ -383,7 +283,7 @@ cdef unary_op_(bint tree,loops,BoolOp op,casting_obj,dtype_obj):
     cdef np.NPY_CASTING casting
     cdef clipper c
 
-    _casting_converter(casting_obj,&casting)
+    common._casting_converter(casting_obj,&casting)
     dtype_obj = check_dtype(dtype_obj)
 
     calc_dtype = load_loops(c,loops,BoolSet.subject,None,casting)
@@ -407,7 +307,7 @@ cdef boolean_op_(bint tree,subject,clip,BoolOp op,casting_obj,dtype_obj):
     cdef np.NPY_CASTING casting
     cdef clipper c
 
-    _casting_converter(casting_obj,&casting)
+    common._casting_converter(casting_obj,&casting)
     dtype_obj = check_dtype(dtype_obj)
 
     calc_dtype = load_loops(c,subject,BoolSet.subject,None,casting)
@@ -425,58 +325,64 @@ def boolean_op_flat(subject,clip,BoolOp op,*,casting='same_kind',dtype=None):
 @cython.auto_pickle(False)
 cdef class Clipper:
     cdef object __weakref__
-    cdef clipper _clip
+    cdef clipper *_clip # clipper is not standard-layout
     cdef object calc_dtype
+
+    def __cinit__(self):
+        self._clip = new clipper()
+    
+    def __dealloc__(self):
+        del self._clip
 
     cdef _add_loop(self,loop,BoolSet bset,casting_obj):
         cdef np.NPY_CASTING casting
-        _casting_converter(casting_obj,&casting)
-        self.calc_dtype = load_loop(self._clip,loop,bset,self.calc_dtype,casting)
+        common._casting_converter(casting_obj,&casting)
+        self.calc_dtype = load_loop(self._clip[0],loop,bset,self.calc_dtype,casting)
 
     def add_loop(self,loop,BoolSet bset,*,casting='same_kind'):
         self._add_loop(loop,bset,casting)
-    
+
     def add_loop_subject(self,loop,*,casting='same_kind'):
         self._add_loop(loop,BoolSet.subject,casting)
-    
+
     def add_loop_clip(self,loop,*,casting='same_kind'):
         self._add_loop(loop,BoolSet.clip,casting)
-    
+
     cdef _add_loops(self,loops,BoolSet bset,casting_obj):
         cdef np.NPY_CASTING casting
-        _casting_converter(casting_obj,&casting)
-        self.calc_dtype = load_loops(self._clip,loops,bset,self.calc_dtype,casting)
-    
+        common._casting_converter(casting_obj,&casting)
+        self.calc_dtype = load_loops(self._clip[0],loops,bset,self.calc_dtype,casting)
+
     def add_loops(self,loops,BoolSet bset,*,casting='same_kind'):
-        load_loops(self._clip,loops,bset,self.calc_dtype,casting)
-    
+        load_loops(self._clip[0],loops,bset,self.calc_dtype,casting)
+
     def add_loops_subject(self,loops,*,casting='same_kind'):
         self._add_loops(loops,BoolSet.subject,casting)
-    
+
     def add_loops_clip(self,loops,*,casting='same_kind'):
         self._add_loops(loops,BoolSet.clip,casting)
-    
+
     cdef execute_(self,bint tree,BoolOp op,dtype_obj):
         dtype_obj = check_dtype(dtype_obj)
 
         if self.calc_dtype is None: return ()
 
-        r = _clipper_execute_(tree,self._clip,op,decide_dtype(<np.dtype>self.calc_dtype,dtype_obj))
-        self._clip.reset()
+        r = _clipper_execute_(tree,self._clip[0],op,decide_dtype(<np.dtype>self.calc_dtype,dtype_obj))
+        self._clip[0].reset()
         self.calc_dtype = None
         return r
-    
+
     def execute_tree(self,BoolOp op,*,dtype=None):
         return self.execute_(1,op,dtype)
-    
+
     def execute_flat(self,BoolOp op,*,dtype=None):
         return self.execute_(0,op,dtype)
-    
+
     def reset(self):
-        self._clip.reset()
+        self._clip[0].reset()
         self.calc_dtype = None
 
 def winding_dir(loop,*,casting='same_kind'):
     cdef np.NPY_CASTING _casting
-    _casting_converter(casting,&_casting)
-    return _winding_dir(to_array(loop),_casting)
+    common._casting_converter(casting,&_casting)
+    return _winding_dir(common.to_array(loop),_casting)

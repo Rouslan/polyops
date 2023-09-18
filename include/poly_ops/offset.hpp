@@ -133,22 +133,24 @@ void add_offset_point(
     point_t<Coord> p2,
     point_t<Coord> p3)
 {
-    point_t<real_coord_t<Coord>> offset = perp_vector<Coord>(p1,p2,magnitude);
+    using real_t = real_coord_t<Coord>;
+
+    point_t<real_t> offset = perp_vector<Coord>(p1,p2,magnitude);
 
     sink(p1 + vround<Coord>(offset),++orig_i);
 
     /* add a point for the new end of this line segment */
     sink(p2 + vround<Coord>(offset),++orig_i);
 
-    if(triangle_winding(p1,p2,p3) * coord_ops<Coord>::unit(magnitude) < 0) {
+    if(static_cast<real_t>(triangle_winding(p1,p2,p3)) * coord_ops<Coord>::unit(magnitude) < 0) {
         // it's concave so we need to approximate an arc
 
-        real_coord_t<Coord> angle = coord_ops<Coord>::pi() - vangle<Coord>(p1-p2,p3-p2);
-        Coord steps = coord_ops<Coord>::to_coord(magnitude * angle / arc_step_size);
+        real_t angle = coord_ops<Coord>::pi() - vangle<Coord>(p1-p2,p3-p2);
+        Coord steps = coord_ops<Coord>::to_coord(magnitude * angle / static_cast<real_t>(arc_step_size));
         long lsteps = std::abs(static_cast<long>(steps));
         if(lsteps > 1) {
-            real_coord_t<Coord> s = coord_ops<Coord>::sin(angle / steps);
-            real_coord_t<Coord> c = coord_ops<Coord>::cos(angle / steps);
+            real_t s = coord_ops<Coord>::sin(angle / static_cast<real_t>(steps));
+            real_t c = coord_ops<Coord>::cos(angle / static_cast<real_t>(steps));
 
             for(long i=1; i<lsteps; ++i) {
                 offset = {c*offset[0] - s*offset[1],s*offset[0] + c*offset[1]};

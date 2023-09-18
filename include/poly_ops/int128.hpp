@@ -58,9 +58,9 @@ template<typename T> concept builtin_number
     = std::integral<T> || std::floating_point<T>;
 
 template<typename T> concept small_sints
-    = std::signed_integral<T> && sizeof(T) < 64;
+    = std::signed_integral<T> && sizeof(T) < 8;
 template<typename T> concept small_uints
-    = std::unsigned_integral<T> && sizeof(T) < 64;
+    = std::unsigned_integral<T> && sizeof(T) < 8;
 
 }
 

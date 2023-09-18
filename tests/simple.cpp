@@ -27,8 +27,8 @@ int main() {
 
     for(int i=0; i<100000; ++i) {
         random_loop(rand_gen,loop_b,4);
-        clip.add_loop_subject(loop_a);
-        clip.add_loop_clip(loop_b);
+        clip.add_loops_subject(loop_a);
+        clip.add_loops_clip(loop_b);
         for(auto &&loop : clip.execute<false>(poly_ops::bool_op::difference)) {
             for(auto &&p : loop) {
                 std::cout << p[0] << ',' << p[1] << ' ';

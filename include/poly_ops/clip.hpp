@@ -133,7 +133,7 @@ protected:
 
 enum class bool_op {
     /* Boolean operation `subject` OR `clip` */
-    union_,
+    union_ = 0,
 
     /* Boolean operation `subject` AND `clip` */
     intersection,
@@ -475,9 +475,9 @@ bool intersects(
         p[0] = x4;
         p[1] = y4;
     } else {
-        auto t = static_cast<real_coord_t<Coord>>(t_i)/d;
-        real_coord_t<Coord> rx = t * (x2-x1);
-        real_coord_t<Coord> ry = t * (y2-y1);
+        auto t = static_cast<real_coord_t<Coord>>(t_i)/static_cast<real_coord_t<Coord>>(d);
+        real_coord_t<Coord> rx = t * static_cast<real_coord_t<Coord>>(x2-x1);
+        real_coord_t<Coord> ry = t * static_cast<real_coord_t<Coord>>(y2-y1);
 
         /* Simple rounding is not sufficient because there is a tiny chance that
         lines are arranged such that rounding one intersection reorders the
@@ -487,8 +487,8 @@ bool intersects(
 
         std::uniform_int_distribution<unsigned short> rdist(0,1);
 
-        p[0] = x1 + (rdist(rgen) ? coord_ops<Coord>::floor(rx) : coord_ops<Coord>::ceil(rx));
-        p[1] = y1 + (rdist(rgen) ? coord_ops<Coord>::floor(ry) : coord_ops<Coord>::ceil(ry));
+        p[0] = static_cast<Coord>(x1 + (rdist(rgen) ? coord_ops<Coord>::floor(rx) : coord_ops<Coord>::ceil(rx)));
+        p[1] = static_cast<Coord>(y1 + (rdist(rgen) ? coord_ops<Coord>::floor(ry) : coord_ops<Coord>::ceil(ry)));
 
         at_edge[0] = at_edge_t::no;
         at_edge[1] = at_edge_t::no;
@@ -866,10 +866,10 @@ public:
     event<Index> &find(points_ref points,const segment_common<Index> &s,event_type_t type,std::size_t upto) {
         auto itr = std::lower_bound(
             events.begin(),
-            events.begin()+upto,
+            events.begin()+std::ptrdiff_t(upto),
             event<Index>{s,0,type},
             cmp{points});
-        POLY_OPS_ASSERT(itr != (events.begin()+upto) && itr->ab == s && itr->type == type);
+        POLY_OPS_ASSERT(itr != (events.begin()+std::ptrdiff_t(upto)) && itr->ab == s && itr->type == type);
         return *itr;
     }
 
@@ -891,7 +891,7 @@ public:
         if(!new_events.empty()) {
             --current_i;
             // backtrack to before the first insertion
-            if(current_i >= static_cast<std::ptrdiff_t>(new_events[0].i)) return {events[current_i],false};
+            if(current_i >= static_cast<std::ptrdiff_t>(new_events[0].i)) return {events[std::size_t(current_i)],false};
 
             incorporate_new();
             POLY_OPS_ASSERT_SLOW(std::ranges::is_sorted(events,cmp{points}));
@@ -907,7 +907,7 @@ public:
                 for(std::size_t i=0; i<new_count; ++i) {
                     auto itr = std::lower_bound(
                         events.begin(),
-                        events.begin()+last_size,
+                        events.begin()+std::ptrdiff_t(last_size),
                         events[last_size+i],
                         cmp{points});
                     
@@ -932,7 +932,7 @@ public:
             }
         }
 
-        return {events[++current_i],true};
+        return {events[std::size_t(++current_i)],true};
     }
 
     void add_event(Index sa,Index sb,Index sweep_node,event_type_t t) {
@@ -982,8 +982,8 @@ public:
             | std::views::transform([](const event<Index> &e) { return e.ab; });
     }
 
-    event<Index> &current() { return events[current_i]; }
-    const event<Index> &current() const { return events[current_i]; }
+    event<Index> &current() { return events[std::size_t(current_i)]; }
+    const event<Index> &current() const { return events[std::size_t(current_i)]; }
 
     /* these are used by graphical_test_common.hpp of the testing code */
     auto begin() const { return events.begin(); }
@@ -1583,7 +1583,7 @@ public:
 
         point_sink(clipper &n,bool_set cat) : n(n), cat(cat), started(false) {}
         point_sink(const point_sink&) = delete;
-        point_sink(point_sink &&b) : n(b.n), prev(b.prev), first_i(b.first_i), started(b.started) {
+        point_sink(point_sink &&b) : n(b.n), prev(b.prev), first_i(b.first_i), cat(b.cat), started(b.started) {
             b.started = false;
         }
 
@@ -1619,7 +1619,9 @@ public:
     same instance of "clipper" to this function. If you want to feed the
     results back into the same instance, make a copy of the data and pass the
     copy here. */
-    template<point_range_or_range_range<Coord> R> void add_loops(R &&loops,bool_set cat) {
+    template<typename R> void add_loops(R &&loops,bool_set cat) {
+        static_assert(point_range_or_range_range<R,Coord>);
+
         if constexpr(point_range_range<R,Coord>) {
             for(auto &&loop : loops) _add_loop(std::forward<decltype(loop)>(loop),cat);
         } else {
@@ -1631,7 +1633,8 @@ public:
     same instance of "clipper" to this function. If you want to feed the
     results back into the same instance, make a copy of the data and pass the
     copy here. */
-    template<point_range_or_range_range<Coord> R> void add_loops_subject(R &&loops) {
+    template<typename R> void add_loops_subject(R &&loops) {
+        static_assert(point_range_or_range_range<R,Coord>);
         add_loops(std::forward<R>(loops),bool_set::subject);
     }
 
@@ -1639,7 +1642,8 @@ public:
     same instance of "clipper" to this function. If you want to feed the
     results back into the same instance, make a copy of the data and pass the
     copy here. */
-    template<point_range_or_range_range<Coord> R> void add_loops_clip(R &&loops) {
+    template<typename R> void add_loops_clip(R &&loops) {
+        static_assert(point_range_or_range_range<R,Coord>);
         add_loops(std::forward<R>(loops),bool_set::clip);
     }
 
@@ -1680,7 +1684,7 @@ public:
     execute(bool_op op) &&;
 };
 
-template<bool TreeOut,coordinate Coord,std::integral Index=std::size_t,point_range_or_range_range<Coord> Input>
+template<bool TreeOut,typename Coord,typename Index=std::size_t,typename Input>
 std::conditional_t<TreeOut,
     temp_polygon_tree_range<Coord,Index>,
     temp_polygon_range<Coord,Index>>
@@ -1689,12 +1693,16 @@ union_op(
     point_tracker<Index> *pt=nullptr,
     std::pmr::memory_resource *contig_mem=nullptr)
 {
+    static_assert(point_range_or_range_range<Input,Coord>);
+    static_assert(coordinate<Coord>);
+    static_assert(std::integral<Index>);
+
     clipper<Coord,Index> n{pt,contig_mem};
     n.add_loops(std::forward<Input>(input),bool_set::subject);
     return std::move(n).template execute<TreeOut>(bool_op::union_);
 }
 
-template<bool TreeOut,coordinate Coord,std::integral Index=std::size_t,point_range_or_range_range<Coord> Input>
+template<bool TreeOut,typename Coord,typename Index=std::size_t,typename Input>
 std::conditional_t<TreeOut,
     temp_polygon_tree_range<Coord,Index>,
     temp_polygon_range<Coord,Index>>
@@ -1703,17 +1711,16 @@ normalize_op(
     point_tracker<Index> *pt=nullptr,
     std::pmr::memory_resource *contig_mem=nullptr)
 {
+    static_assert(point_range_or_range_range<Input,Coord>);
+    static_assert(coordinate<Coord>);
+    static_assert(std::integral<Index>);
+
     clipper<Coord,Index> n{pt,contig_mem};
     n.add_loops(std::forward<Input>(input),bool_set::subject);
     return std::move(n).template execute<TreeOut>(bool_op::normalize);
 }
 
-template<
-    bool TreeOut,
-    coordinate Coord,
-    std::integral Index=std::size_t,
-    point_range_or_range_range<Coord> SInput,
-    point_range_or_range_range<Coord> CInput>
+template<bool TreeOut,typename Coord,typename Index=std::size_t,typename SInput,typename CInput>
 std::conditional_t<TreeOut,
     temp_polygon_tree_range<Coord,Index>,
     temp_polygon_range<Coord,Index>>
@@ -1724,6 +1731,11 @@ boolean_op(
     point_tracker<Index> *pt=nullptr,
     std::pmr::memory_resource *contig_mem=nullptr)
 {
+    static_assert(point_range_or_range_range<CInput,Coord>);
+    static_assert(point_range_or_range_range<SInput,Coord>);
+    static_assert(coordinate<Coord>);
+    static_assert(std::integral<Index>);
+
     clipper<Coord,Index> n{pt,contig_mem};
     n.add_loops(std::forward<SInput>(subject),bool_set::subject);
     n.add_loops(std::forward<CInput>(clip),bool_set::clip);

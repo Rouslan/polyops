@@ -202,23 +202,29 @@ Types
             point_tracker<Index> *pt=nullptr,\
             std::pmr::memory_resource *_contig_mem=nullptr)
 
-    .. cpp:function:: template<point_range_or_range_range<Coord> R> void add_loops(R &&loops,bool_set cat)
+    .. cpp:function:: template<typename R> void add_loops(R &&loops,bool_set cat)
 
         Add input polygons.
 
         The output returned by :cpp:func:`execute` is invalidated.
 
-    .. cpp:function:: template<point_range_or_range_range<Coord> R> void add_loops_subject(R &&loops)
+        `R` must satisfy :cpp:concept:`point_range_or_range_range`.
+
+    .. cpp:function:: template<typename R> void add_loops_subject(R &&loops)
 
         Add input *subject* polygons.
 
         The output returned by :cpp:func:`execute` is invalidated.
 
-    .. cpp:function:: template<point_range_or_range_range<Coord> R> void add_loops_clip(R &&loops)
+        `R` must satisfy :cpp:concept:`point_range_or_range_range`.
+
+    .. cpp:function:: template<typename R> void add_loops_clip(R &&loops)
 
         Add input *clip* polygons.
 
         The output returned by :cpp:func:`execute` is invalidated.
+
+        `R` must satisfy :cpp:concept:`point_range_or_range_range`.
 
     .. cpp:function:: point_sink add_loop(bool_set cat)
 
@@ -227,7 +233,7 @@ Types
         This is an alternative to adding loops with ranges. The return value is
         a functor that allows adding one point at a time. The destructor of the
         return value must be called before any method of this instance of
-        `clipper` is called afterwards.
+        `clipper` is called.
 
         The output returned by :cpp:func:`execute` is invalidated.
 
@@ -270,7 +276,7 @@ Types
 Functions
 ----------------
 
-.. cpp:function:: template<bool TreeOut,coordinate Coord,std::integral Index=std::size_t,point_range_or_range_range<Coord> Input>\
+.. cpp:function:: template<bool TreeOut,typename Coord,typename Index=std::size_t,typename Input>\
     std::conditional_t<TreeOut,\
         temp_polygon_tree_range<Index,Coord>,\
         temp_polygon_range<Index,Coord>>\
@@ -285,7 +291,11 @@ Functions
     This is equivalent to calling :cpp:func:`boolean_op` with an empty range
     passed to `clip` and :cpp:enumerator:`bool_op::union_` passed to `op`.
 
-.. cpp:function:: template<bool TreeOut,coordinate Coord,std::integral Index=std::size_t,point_range_or_range_range<Coord> Input>\
+    `Coord` must satisfy :cpp:concept:`coordinate`.
+    `Index` must satisfy `std::integral`.
+    `Input` must satisfy :cpp:concept:`point_range_or_range_range`.
+
+.. cpp:function:: template<bool TreeOut,typename Coord,typename Index=std::size_t,typename Input>\
     std::conditional_t<TreeOut,\
         temp_polygon_tree_range<Coord,Index>,\
         temp_polygon_range<Coord,Index>>\
@@ -300,7 +310,11 @@ Functions
     This is equivalent to calling :cpp:func:`boolean_op` with an empty range
     passed to `clip` and :cpp:enumerator:`bool_op::normalize` passed to `op`.
 
-.. cpp:function:: template<bool TreeOut,coordinate Coord,std::integral Index=std::size_t,point_range_or_range_range<Coord> SInput,point_range_or_range_range<Coord> CInput>\
+    `Coord` must satisfy :cpp:concept:`coordinate`.
+    `Index` must satisfy `std::integral`.
+    `Input` must satisfy :cpp:concept:`point_range_or_range_range`.
+
+.. cpp:function:: template<bool TreeOut,typename Coord,typename Index=std::size_t,typename SInput,typename CInput>\
     std::conditional_t<TreeOut,\
         temp_polygon_tree_range<Index,Coord>,\
         temp_polygon_range<Index,Coord>>\
@@ -322,3 +336,8 @@ Functions
         n.add_loops(subject,bool_set::subject);
         n.add_loops(clip,bool_set::clip);
         RETURN_VALUE = std::move(n).execute<TreeOut>(op);
+    
+    `Coord` must satisfy :cpp:concept:`coordinate`.
+    `Index` must satisfy `std::integral`.
+    `SInput` must satisfy :cpp:concept:`point_range_or_range_range`.
+    `CInput` must satisfy :cpp:concept:`point_range_or_range_range`.
