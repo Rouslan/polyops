@@ -1,12 +1,27 @@
 [build-system]
-requires = ["setuptools >= 61","Cython >= 0.29","packaging","setuptools-git-versioning<2"]
-build-backend = "setuptools.build_meta"
+requires = ["scikit-build-core","Cython >= 0.29","numpy"]
+build-backend = "scikit_build_core.build"
 
-[tool.setuptools-git-versioning]
-enabled = true
+[tool.scikit-build]
+minimum-version = "0.5"
+
+[tool.scikit-build.sdist]
+include = [
+    "/CMakeLists.txt",
+    "/include/poly_ops/*.hpp",
+    "/LICENSE.txt",
+    "/py",
+    "/pyproject.toml",
+    "/tests/test_data"]
+exclude = ["*"]
+
+[tool.scikit-build.cmake]
+minimum-version = "3.19"
+build-type = "Release"
 
 [project]
 name = "polyops"
+version = "0.0.1"
 description = "Operations on polygons"
 readme = "py/README.md"
 authors = [{name="Rouslan Korneychuk",email="rouslank@msn.com"}]
@@ -19,4 +34,3 @@ classifiers = [
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Scientific/Engineering :: Mathematics"]
 dependencies = ["numpy"]
-dynamic = ["version"]

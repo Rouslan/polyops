@@ -17,8 +17,9 @@ enum class color_t {black,red};
 template<typename T,typename Index> struct set_node {
     Index parent
 #ifndef NDEBUG
-        = std::numeric_limits<Index>::max();
+        = std::numeric_limits<Index>::max()
 #endif
+    ;
     Index left;
     Index right;
     color_t color;

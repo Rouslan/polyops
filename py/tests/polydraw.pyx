@@ -33,12 +33,12 @@ cdef extern from *:
     #include <limits>
     #include <optional>
 
-    #include "polydraw.hpp"
+    #include <poly_ops/polydraw.hpp>
 
 
-    using rasterizer = polydraw::rasterizer<coord_t>;
-    using scan_line_sweep_state = polydraw::scan_line_sweep_state<coord_t>;
-    using polydraw::scan_line;
+    using rasterizer = poly_ops::draw::rasterizer<coord_t>;
+    using scan_line_sweep_state = poly_ops::draw::scan_line_sweep_state<coord_t>;
+    using poly_ops::draw::scan_line;
 
     PyObject *unexpected_exc() noexcept {
         PyErr_SetString(PyExc_RuntimeError,"unexpected exception thrown by poly_ops");

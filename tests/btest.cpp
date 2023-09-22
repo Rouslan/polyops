@@ -50,7 +50,7 @@ S           ::= [ \t]+
 #include <iostream>
 
 #include "bitmap.hpp"
-#include "polydraw.hpp"
+#include "../include/poly_ops/polydraw.hpp"
 #include "../include/poly_ops/base.hpp"
 #include "../include/poly_ops/clip.hpp"
 
@@ -363,7 +363,7 @@ constexpr int OP_COUNT = static_cast<int>(std::extent_v<decltype(bool_op_names)>
 
 bool test_op(
     poly_ops::clipper<coord_t> &clip,
-    polydraw::rasterizer<coord_t> &rast,
+    poly_ops::draw::rasterizer<coord_t> &rast,
     const test_case<coord_t> &test,
     poly_ops::bool_op op,
     const std::string &file_id,
@@ -387,7 +387,7 @@ bool test_op(
         test_img.width(),
         test_img.height(),
         std::bind_front(&bitmap::set_row,std::ref(test_img)),
-        polydraw::fill_rule_t::positive);
+        poly_ops::draw::fill_rule_t::positive);
 
     auto diff = test_img ^ target_img;
     if(diff.has_square(DIFF_FAIL_SQUARE_SIZE)) {
@@ -455,11 +455,11 @@ int main(int argc,char *argv[]) {
         check_square_finder(test_source);
 
         poly_ops::clipper<coord_t> clip;
-        polydraw::rasterizer<coord_t> rast;
+        poly_ops::draw::rasterizer<coord_t> rast;
 
         for(auto &test : state.tests) {
             bool has_one = false;
-            for(int i=0; i<=OP_COUNT; ++i) {
+            for(int i=0; i<OP_COUNT; ++i) {
                 if(!test.op_files[i].empty()) {
                     has_one = true;
                     if(operation != -1 && operation != i) continue;

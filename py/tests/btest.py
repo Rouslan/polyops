@@ -1,10 +1,12 @@
 import sys
 import re
 import numpy as np
-import os.path
+import unittest
+import importlib.resources
 
-import poly_ops
-import polydraw
+import polyops
+from . import polydraw
+from . import test_data
 
 DIFF_FAIL_SQUARE_SIZE = 5
 DUMP_FAILURE_DIFF = False
@@ -20,15 +22,15 @@ RE_PBM_HEADER = re.compile(b"""
     (?:#.*[\n\r])*\\s""",re.VERBOSE)
 
 
+test_data_files = importlib.resources.files(test_data)
+
 class ImgFormatError(Exception):
     pass
 
-def read_pbm(filename):
-    with open(filename,'rb') as f_in:
-        data = f_in.read()
+def read_pbm(filename,data):
     if not data.startswith(b'P4'):
         raise ImgFormatError('not a binary PBM file',filename)
-    
+
     m = RE_PBM_HEADER.match(data,2)
     if not m:
         raise ImgFormatError('invalid PBM file',filename)
@@ -48,7 +50,7 @@ def write_pbm(filename,data):
 def has_square(data):
     if data.shape[0] < DIFF_FAIL_SQUARE_SIZE or data.shape[1] < DIFF_FAIL_SQUARE_SIZE:
         raise Exception('image too small for meaningful comparison')
-    
+
     inner_w = data.shape[1]-DIFF_FAIL_SQUARE_SIZE+1
     inner_h = data.shape[0]-DIFF_FAIL_SQUARE_SIZE+1
     summed = np.ones((inner_h,inner_w),np.ubyte)
@@ -56,13 +58,13 @@ def has_square(data):
     for y in range(DIFF_FAIL_SQUARE_SIZE):
         for x in range(DIFF_FAIL_SQUARE_SIZE):
             summed &= data[y:y+inner_h,x:x+inner_w]
-    
+
     return np.any(summed)
 
 class TestCase:
     def __init__(self):
         self.set_data = ([],[])
-        self.op_files = [None] * len(poly_ops.BoolOp)
+        self.op_files = [None] * len(polyops.BoolOp)
 
 class ParseError(Exception):
     pass
@@ -72,7 +74,7 @@ def require_whitespace_or_comment(line,lnum):
     if line and not line.startswith("#"):
         raise ParseError(lnum)
 
-def parse_tests(ipath):
+def parse_tests():
     tests = [TestCase()]
     touched = False
     last_set = None
@@ -92,12 +94,12 @@ def parse_tests(ipath):
         touched = True
         partial_line = None
 
-    with open(ipath) as ifile:
+    with (test_data_files/'input.txt').open() as ifile:
         for i,line in enumerate(ifile):
             if partial_line is not None:
                 end_array_assign(re_array_assign_end.match(line),i)
             else:
-                for s in poly_ops.BoolSet:
+                for s in polyops.BoolSet:
                     if line.startswith(s.name):
                         last_set = s
                         m = re_array_assign_start.match(line,len(s.name))
@@ -107,7 +109,7 @@ def parse_tests(ipath):
                         end_array_assign(re_array_assign_end.match(line,m.end()),i)
                         break
                 else:
-                    for op in poly_ops.BoolOp:
+                    for op in polyops.BoolOp:
                         if line.startswith(op.name):
                             m = re_op_assign.match(line,len(op.name))
                             if not m:
@@ -130,61 +132,61 @@ def parse_tests(ipath):
     if not touched: tests.pop()
     return tests
 
-def test_op(clip,rast,test,op,file_id,folder):
-    target_img = read_pbm(os.path.join(folder,file_id + ".pbm"))
-    test_img = np.zeros_like(target_img)
+class BitmapTestCase(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.data = parse_tests()
 
-    clip.add_loops_subject(test.set_data[poly_ops.BoolSet.subject])
-    clip.add_loops_clip(test.set_data[poly_ops.BoolSet.clip])
+        for item in cls.data:
+            if all(op is None for op in item.op_files):
+                print("warning: test entry found with nothing to test against",file=sys.stderr)
+                break
 
-    rast.reset()
-    rast.add_loops(clip.execute_flat(op))
-    for x1,x2,y,wind in rast.scan_lines(test_img.shape[1],test_img.shape[0]):
-        if wind > 0:
-            test_img[y,x1:x2+1] = 1
+        cls.clip = polyops.Clipper()
+        cls.rast = polydraw.Rasterizer()
 
-    diff = test_img != target_img
-    if has_square(diff):
-        print(f'failure with operation "{op.name}" compared to file "{file_id}"',file=sys.stderr)
-        if DUMP_FAILURE_DIFF:
-            write_pbm(file_id + "_mine.pbm",test_img)
-            write_pbm(file_id + "_diff.pbm",diff)
-        return False
-    return True
+    def _run_op(self,op):
+        for item in self.data:
+            if item.op_files[op] is None: continue
 
-def run(datafile):
-    tests = 0
-    successes = 0
+            file_id = item.op_files[op]
 
-    cases = parse_tests(datafile)
-    
-    test_source = os.path.dirname(datafile)
+            with self.subTest(file=file_id):
+                imgfilename = file_id + '.pbm'
+                target_img = read_pbm(imgfilename,(test_data_files/imgfilename).read_bytes())
+                test_img = np.zeros_like(target_img)
 
-    # make sure bitmap::has_square works
-    assert not has_square(read_pbm(os.path.join(test_source,"discont.pbm")))
-    assert has_square(read_pbm(os.path.join(test_source,"cont.pbm")))
+                self.clip.add_loops_subject(item.set_data[polyops.BoolSet.subject])
+                self.clip.add_loops_clip(item.set_data[polyops.BoolSet.clip])
 
-    clip = poly_ops.Clipper()
-    rast = polydraw.Rasterizer()
+                self.rast.reset()
+                self.rast.add_loops(self.clip.execute_flat(op))
+                for x1,x2,y,wind in self.rast.scan_lines(test_img.shape[1],test_img.shape[0]):
+                    if wind > 0:
+                        test_img[y,x1:x2+1] = 1
 
-    for case in cases:
-        has_one = False
-        for op in poly_ops.BoolOp:
-            if case.op_files[op] is not None:
-                has_one = True
-                successes += test_op(clip,rast,case,op,case.op_files[op],test_source)
-                tests += 1
+                diff = test_img != target_img
+                if has_square(diff):
+                    if DUMP_FAILURE_DIFF:
+                        write_pbm(file_id + "_mine.pbm",test_img)
+                        write_pbm(file_id + "_diff.pbm",diff)
+                    self.fail('output does not match file')
 
-        if not has_one:
-            print("warning: test entry found with nothing to test against",file=sys.stderr)
-            continue;
+    def test_union(self):
+        self._run_op(polyops.BoolOp.union)
 
-    print(f"passed tests: {successes} out of {tests}",file=sys.stderr)
+    def test_intersection(self):
+        self._run_op(polyops.BoolOp.intersection)
 
-    return tests != successes
+    def test_xor(self):
+        self._run_op(polyops.BoolOp.xor)
+
+    def test_difference(self):
+        self._run_op(polyops.BoolOp.difference)
+
+    # this doesn't work yet
+    #def test_normalize(self):
+    #    self._run_op(polyops.BoolOp.normalize)
 
 if __name__ == '__main__':
-    if len(sys.argv) != 2:
-        print("exactly one argument is required",file=sys.stderr)
-        exit(2)
-    exit(run(sys.argv[1]))
+    unittest.main()

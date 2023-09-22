@@ -1,14 +1,14 @@
-# Note: this makefile is not meant for users of the poly_ops library. It is for
-# the convenience of the developer(s). Read py/README.rst for instructions on
-# building and installing the Python module as intended.
-
 cmake_minimum_required(VERSION 3.19)
-project(poly_ops)
+project(poly_ops LANGUAGES CXX)
 
-include(CTest)
-enable_testing()
+if(NOT DEFINED SKBUILD)
+    include(CTest)
+    enable_testing()
 
-add_subdirectory(tests)
-add_subdirectory(example)
+    add_subdirectory(tests)
+    add_subdirectory(example)
+    add_subdirectory(doc)
+endif()
+
 add_subdirectory(py)
-add_subdirectory(doc)
+

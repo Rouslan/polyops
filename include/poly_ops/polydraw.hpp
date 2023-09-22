@@ -8,11 +8,11 @@
 #include <bit>
 #include <cassert>
 
-#include "../include/poly_ops/base.hpp"
-#include "../include/poly_ops/sweep_set.hpp"
-#include "../include/poly_ops/large_ints.hpp"
+#include "base.hpp"
+#include "sweep_set.hpp"
+#include "large_ints.hpp"
 
-namespace polydraw {
+namespace poly_ops::draw {
 
 enum class fill_rule_t {non_zero,even_odd,positive,negative};
 
@@ -705,6 +705,6 @@ void rasterizer<Coord>::draw(unsigned int width,unsigned int height,F &&fill_row
     }
 }
 
-} // namespace polydraw
+} // namespace poly_ops::draw
 
 #endif
