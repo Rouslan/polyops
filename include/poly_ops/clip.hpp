@@ -1457,30 +1457,101 @@ temp_polygon_proxy<Coord,Index,true> indexed(const temp_polygon_proxy<Coord,Inde
 
 namespace detail {
 
+template<typename I,typename F>
+struct iterator_facade {
+    using value_type = std::invoke_result_t<F,std::iter_value_t<I>>;
+
+    I base;
+    const F *fun;
+
+    iterator_facade &operator++() noexcept {
+        ++base;
+        return *this;
+    }
+    iterator_facade operator++(int) noexcept {
+        return {base++,fun};
+    }
+    iterator_facade &operator--() noexcept {
+        --base;
+        return *this;
+    }
+    iterator_facade operator--(int) noexcept {
+        return {base--,fun};
+    }
+
+    iterator_facade &operator+=(std::iter_difference_t<I> n) noexcept {
+        base += n;
+        return *this;
+    }
+    iterator_facade &operator-=(std::iter_difference_t<I> n) noexcept {
+        base -= n;
+        return *this;
+    }
+    iterator_facade operator+(std::iter_difference_t<I> n) const noexcept {
+        return {base+n,fun};
+    }
+    iterator_facade operator-(std::iter_difference_t<I> n) const noexcept {
+        return {base-n,fun};
+    }
+    std::iter_difference_t<I> operator-(const iterator_facade &b) const noexcept {
+        return base - b.base;
+    }
+    value_type operator[](std::iter_difference_t<I> n) const noexcept {
+        return (*fun)(base[n]);
+    }
+    value_type operator*() const noexcept {
+        return (*fun)(*base);
+    }
+    auto operator<=>(const iterator_facade &b) const noexcept {
+        return base <=> b.base;
+    }
+    bool operator==(const iterator_facade &b) const noexcept {
+        return base == b.base;
+    }
+    friend iterator_facade operator+(std::iter_difference_t<I> a,const iterator_facade &b) noexcept {
+        return {a + b.base,b.fun};
+    }
+};
+
+/* this is basically std::ranges::transform_view except it supports r-value
+references on GCC 11 */
+template<typename R,typename F> struct range_facade {
+    R base;
+    F fun;
+
+    std::size_t size() const noexcept {
+        return std::ranges::size(base);
+    }
+    bool empty() const noexcept { return std::ranges::empty(base); }
+
+    auto begin() const noexcept { return iterator_facade{std::ranges::begin(base),&fun}; }
+    auto end() const noexcept { return iterator_facade{std::ranges::end(base),&fun}; }
+};
+
 template<typename Index,typename Coord> auto make_temp_polygon_tree_range(
-    const std::pmr::vector<loop_point<Index,Coord>> &&lpoints,
+    std::pmr::vector<loop_point<Index,Coord>> &&lpoints,
     std::pmr::vector<temp_polygon<Index>> &&loops,
     std::pmr::vector<temp_polygon<Index>*> &&top)
 {
     /* "loops" isn't used directly but is referenced by "top" */
-    return std::ranges::owning_view(std::move(top))
-        | std::views::transform(
-            [lpoints=std::move(lpoints),loops=std::move(loops)]
-            (const temp_polygon<Index> *poly) {
-                return temp_polygon_proxy<Coord,Index>(lpoints.data(),*poly);
-            });
+    return range_facade{
+        std::move(top),
+        [lpoints=std::move(lpoints),loops=std::move(loops)]
+        (const temp_polygon<Index> *poly) {
+            return temp_polygon_proxy<Coord,Index>(lpoints.data(),*poly);
+        }};
 }
 
 template<typename Index,typename Coord> auto make_temp_polygon_range(
     std::pmr::vector<loop_point<Index,Coord>> &&lpoints,
     std::pmr::vector<temp_polygon<Index>> &&loops)
 {
-    return std::ranges::owning_view(std::move(loops))
-        | std::views::transform(
-            [lpoints=std::move(lpoints)]
-            (const temp_polygon<Index> &poly) {
-                return temp_polygon_proxy<Coord,Index>(lpoints.data(),poly);
-            });
+    return range_facade{
+        std::move(loops),
+        [lpoints=std::move(lpoints)]
+        (const temp_polygon<Index> &poly) {
+            return temp_polygon_proxy<Coord,Index>(lpoints.data(),poly);
+        }};
 }
 
 template<typename Index,typename Coord> auto make_temp_polygon_range(

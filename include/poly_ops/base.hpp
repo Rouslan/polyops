@@ -154,6 +154,8 @@ template<typename T> struct point_t {
             && noexcept(point_ops<U>::get_x(b))
             && noexcept(point_ops<U>::get_y(b)))
         : _data{point_ops<U>::get_x(b),point_ops<U>::get_y(b)} {}
+    
+    constexpr point_t &operator=(const point_t &b) noexcept(std::is_nothrow_copy_constructible_v<T>) = default;
 
     constexpr T &operator[](std::size_t i) noexcept { return _data[i]; }
     constexpr const T &operator[](std::size_t i) const noexcept { return _data[i]; }

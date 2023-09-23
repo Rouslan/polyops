@@ -80,7 +80,7 @@ template<typename T,typename Index,typename Vec> struct offset_ptr : offset_ptr_
     template<typename U> using rebind = offset_ptr<U,Index,Vec>;
 
     template<typename UPtr>
-    requires requires(UPtr::element_type *x) { const_cast<T*>(x); }
+    requires requires(typename UPtr::element_type *x) { const_cast<T*>(x); }
     static offset_ptr const_cast_from(const UPtr &x) noexcept {
         return {x.vec,x.i};
     }
@@ -117,9 +117,9 @@ template<typename Index,typename Base,typename Vec> struct _value_traits {
     Vec *vec;
 
     using node_traits = _node_traits<Index,Base,Vec>;
-    using node = node_traits::node;
-    using node_ptr = node_traits::node_ptr;
-    using const_node_ptr = node_traits::const_node_ptr;
+    using node = typename node_traits::node;
+    using node_ptr = typename node_traits::node_ptr;
+    using const_node_ptr = typename node_traits::const_node_ptr;
     using value_type = node;
     using pointer = node*;
     using const_pointer = const node*;
@@ -142,7 +142,7 @@ template<typename T,typename Index,typename Base,typename Vec=std::pmr::vector<s
 class tree_iterator {
 public:
     // this needs to be non-const
-    using node_ptr = _node_traits<Index,Base,Vec>::node_ptr;
+    using node_ptr = typename _node_traits<Index,Base,Vec>::node_ptr;
 
     using node_algo = rbtree_algorithms<_node_traits<Index,Base,Vec>>;
 
@@ -221,9 +221,9 @@ public:
     using iterator = tree_iterator<element_type,Index,T,Vec>;
     using const_iterator = tree_iterator<const element_type,Index,T,Vec>;
     using value_traits = _value_traits<Index,T,Vec>;
-    using node_traits = value_traits::node_traits;
-    using node_ptr = value_traits::node_ptr;
-    using const_node_ptr = value_traits::const_node_ptr;
+    using node_traits = typename value_traits::node_traits;
+    using node_ptr = typename value_traits::node_ptr;
+    using const_node_ptr = typename value_traits::const_node_ptr;
     using node_algo = rbtree_algorithms<node_traits>;
 
     struct cmp_wrapper {

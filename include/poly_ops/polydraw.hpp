@@ -157,6 +157,7 @@ template<typename Coord> struct cached_segment : segment_common {
     template<typename T> cached_segment(std::size_t a,std::size_t b,const T &points)
         : segment_common{a,b}, pa{points[a].data}, pb{points[b].data} {}
     cached_segment(const cached_segment&) = default;
+    cached_segment &operator=(const cached_segment&) = default;
 };
 
 template<typename Coord>

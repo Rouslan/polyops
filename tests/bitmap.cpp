@@ -13,7 +13,7 @@ namespace {
 
 unsigned char rev_bits(unsigned char x) {
     const unsigned char rev_nibble[16] = {0,8,4,12,2,10,6,14,1,9,5,13,3,11,7,15};
-    return (rev_nibble[x & 0xf] << 4) | rev_nibble[x >> 4];
+    return static_cast<unsigned char>((rev_nibble[x & 0xf] << 4) | rev_nibble[x >> 4]);
 }
 
 void throw_invalid_pbm() {

@@ -361,7 +361,8 @@ public:
         hi() = _hi;
     }
 
-    template<comp_or_single_i T> explicit(detail::int_count<Signed,T> > N || (detail::signed_type<T> && !Signed)) constexpr
+    /* SFINAE doesn't seem to hold when using detail::int_count instead of the longer equivalent, under Clang 16.0.6 */
+    template<comp_or_single_i T> explicit(detail::_int_count<Signed,std::decay_t<T>>::value > N || (detail::signed_type<T> && !Signed)) constexpr
     compound_xint(const T &b) : compound_xint{detail::compi_hi<N>(b),detail::compi_lo<N>(b)} {}
 
     /*template<std::floating_point T> explicit constexpr compound_int(T b) noexcept
