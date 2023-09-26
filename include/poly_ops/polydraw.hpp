@@ -583,7 +583,7 @@ template<typename Coord> struct scan_line_sweep_state {
     unsigned int height;
     detail::sweep_t<Coord> sweep;
     Coord y;
-    detail::sweep_t<Coord>::const_iterator s_itr;
+    typename detail::sweep_t<Coord>::const_iterator s_itr;
     Coord x;
     long winding;
     bool suspended;
