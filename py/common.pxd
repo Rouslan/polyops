@@ -3,15 +3,13 @@ cimport numpy as np
 cdef extern from *:
     """
     #include <cstdint>
-    #include <poly_ops/int128.hpp>
+    #include <type_traits>
+    #include <poly_ops/large_ints.hpp>
 
-    #if POLY_OPS_HAVE_128BIT_INT
-    using coord_t = std::int64_t;
-    constexpr inline int COORD_T_NPY = NPY_INT64;
-    #else
-    using coord_t = std::int32_t;
-    constexpr inline int COORD_T_NPY = NPY_INT32;
-    #endif
+    constexpr inline bool IS_64BIT_PLATFORM = sizeof(poly_ops::large_ints::full_uint) == 8;
+
+    using coord_t = std::conditional_t<IS_64BIT_PLATFORM,std::int64_t,std::int32_t>;
+    constexpr inline int COORD_T_NPY = IS_64BIT_PLATFORM ? NPY_INT64 : NPY_INT32;
 
     struct npy_iterator {
         NpyIter *itr;

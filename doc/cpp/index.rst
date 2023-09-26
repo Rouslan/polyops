@@ -55,7 +55,7 @@ internal representation used by the algorithm and is not sequential.
 In the case of the :cpp:class:`clipper` class, the output references the data
 owned by the class. If the class is destroyed or if any of its methods are
 called, the output is invalidated. The exception is, given an instance of
-:cpp:class:`clipper` `clip`, calling `std::move(clip).execute<...>(...)` will
+:cpp:class:`clipper` `clip`, calling ``std::move(clip).execute<...>(...)`` will
 return an object that takes ownership of the data.
 
 
@@ -207,21 +207,9 @@ Coord Template Parameter
 
 The `Coord` template parameter of the functions and classes of this library is
 the type that will represent coordinate values. This can be any built-in signed
-integer.
-
-Note that although 64-bit integers can be always be used, values that can't be
-represented with 32-bit integers will cause overflow unless the target
-architecture has native 64-bit integers. Additionally, the compiler must be
-either Microsoft Visual C++ or a compiler that supports the `__int128` extension
-(GCC, Clang and Intel C++ Compiler support this extension). If 64-bit values are
-supported, the preprocessor definition :c:macro:`POLY_OPS_HAVE_128BIT_INT` will
-have a value of `1`; otherwise it will have a value of `0` (it is always
-defined). This limitation can be bypassed by specializing
-:cpp:struct:`coord_ops`.
-
-In addition to built-in integers, any class that satisfies
-:cpp:concept:`coordinate` can be used. This requires :cpp:struct:`coord_ops` to
-be specialized to provide equivalent mathematical functions.
+integer or any class that satisfies :cpp:concept:`coordinate`. When using your
+own class, :cpp:struct:`coord_ops` needs to be specialized to provide equivalent
+mathematical functions.
 
 
 Index Template Parameter
@@ -242,4 +230,4 @@ Reference
 .. toctree::
     base
     clip
-    int128
+    large_ints

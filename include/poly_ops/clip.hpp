@@ -17,8 +17,8 @@
 #include <type_traits>
 #include <random>
 
-/* POLY_OPS_ASSERT can be defined to use exception, so it can't be used inside
-functions marked as "noexcept". In such cases, "assert" is used. */
+/* POLY_OPS_ASSERT can be defined to use an exception, so it can't be used
+inside functions marked as "noexcept". In such cases, "assert" is used. */
 #include <cassert>
 
 #include "base.hpp"
@@ -1524,9 +1524,12 @@ template<typename R,typename F> struct range_facade {
     }
     bool empty() const noexcept { return std::ranges::empty(base); }
 
-    auto begin() const noexcept { return iterator_facade{std::ranges::begin(base),&fun}; }
-    auto end() const noexcept { return iterator_facade{std::ranges::end(base),&fun}; }
+    auto begin() const noexcept { return iterator_facade<std::ranges::iterator_t<const R>,F>{std::ranges::begin(base),&fun}; }
+    auto end() const noexcept { return iterator_facade<std::ranges::iterator_t<const R>,F>{std::ranges::end(base),&fun}; }
 };
+
+template<typename R,typename F> range_facade(R &&base,F &&fun)
+    -> range_facade<std::remove_reference_t<R>,std::remove_reference_t<F>>;
 
 template<typename Index,typename Coord> auto make_temp_polygon_tree_range(
     std::pmr::vector<loop_point<Index,Coord>> &&lpoints,
@@ -1534,24 +1537,24 @@ template<typename Index,typename Coord> auto make_temp_polygon_tree_range(
     std::pmr::vector<temp_polygon<Index>*> &&top)
 {
     /* "loops" isn't used directly but is referenced by "top" */
-    return range_facade{
+    return range_facade(
         std::move(top),
         [lpoints=std::move(lpoints),loops=std::move(loops)]
         (const temp_polygon<Index> *poly) {
             return temp_polygon_proxy<Coord,Index>(lpoints.data(),*poly);
-        }};
+        });
 }
 
 template<typename Index,typename Coord> auto make_temp_polygon_range(
     std::pmr::vector<loop_point<Index,Coord>> &&lpoints,
     std::pmr::vector<temp_polygon<Index>> &&loops)
 {
-    return range_facade{
+    return range_facade(
         std::move(loops),
         [lpoints=std::move(lpoints)]
         (const temp_polygon<Index> &poly) {
             return temp_polygon_proxy<Coord,Index>(lpoints.data(),poly);
-        }};
+        });
 }
 
 template<typename Index,typename Coord> auto make_temp_polygon_range(
@@ -1828,7 +1831,7 @@ void clipper<Coord,Index>::point_sink::operator()(const point_t<Coord> &p,Index 
     the destructor is called, but duplicate points aren't added anyway and
     adding it on the first call means the "prev != n.lpoints.back().data" checks
     above and in the destructor are always safe. */
-    n.lpoints.emplace_back(prev,static_cast<Index>(n.lpoints.size())+1,cat);
+    n.lpoints.emplace_back(prev,static_cast<Index>(n.lpoints.size()+1),cat);
     if(n.pt) n.pt->point_added(n.original_i);
 
 skip:
@@ -1839,7 +1842,7 @@ template<coordinate Coord,std::integral Index>
 clipper<Coord,Index>::point_sink::~point_sink() {
     if(started) [[likely]] {
         if(prev != n.lpoints.back().data && prev != n.lpoints[first_i].data) [[likely]] {
-            n.lpoints.emplace_back(prev,0,cat);
+            n.lpoints.emplace_back(prev,Index(0),cat);
             if(n.pt) n.pt->point_added(n.original_i);
         }
 

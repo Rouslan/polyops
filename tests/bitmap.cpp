@@ -113,52 +113,52 @@ bitmap operator^(const bitmap &a,const bitmap &b) {
     return r;
 }
 
+bitmap bitmap::from_pbm_file(std::FILE *file) {
+    if(require_c(file) != 'P' || require_c(file) != '4') throw std::runtime_error("not a binary PBM file");
+    require_blank(file);
+
+    unsigned int width = require_uint(file);
+    require_blank(file);
+    unsigned int height = require_uint(file);
+
+    for(;;) {
+        char c = require_c(file);
+        if(c == '#') skip_comment(file);
+        else if(is_blank(c)) break;
+        else throw_invalid_pbm();
+    }
+
+    bitmap r{width,height};
+
+    for(unsigned int y=0; y<height; ++y) {
+        for(unsigned int xw=0; xw < width/word_bit_size; ++xw) {
+            word_t &w = r.data()[y*r.stride() + xw];
+            w = 0;
+            for(unsigned int i=0; i<sizeof(word_t); ++i) take_byte(w,i,file);
+        }
+        if(unsigned int bits = width % word_bit_size) {
+            word_t &w = r.data()[(y+1)*r.stride() - 1];
+            w = 0;
+            for(unsigned int i=0; i<(bits+7)/8; ++i) take_byte(w,i,file);
+        }
+    }
+
+    return r;
+}
+
 bitmap bitmap::from_pbm_file(const char *filename) {
     std::FILE *file = std::fopen(filename,"rb");
     if(!file) throw std::system_error(errno,std::generic_category());
     file_closer closer{file};
 
     try {
-        if(require_c(file) != 'P' || require_c(file) != '4') throw std::runtime_error("not a binary PBM file");
-        require_blank(file);
-
-        unsigned int width = require_uint(file);
-        require_blank(file);
-        unsigned int height = require_uint(file);
-        
-        for(;;) {
-            char c = require_c(file);
-            if(c == '#') skip_comment(file);
-            else if(is_blank(c)) break;
-            else throw_invalid_pbm();
-        }
-
-        bitmap r{width,height};
-
-        for(unsigned int y=0; y<height; ++y) {
-            for(unsigned int xw=0; xw < width/word_bit_size; ++xw) {
-                word_t &w = r.data()[y*r.stride() + xw];
-                w = 0;
-                for(unsigned int i=0; i<sizeof(word_t); ++i) take_byte(w,i,file);
-            }
-            if(unsigned int bits = width % word_bit_size) {
-                word_t &w = r.data()[(y+1)*r.stride() - 1];
-                w = 0;
-                for(unsigned int i=0; i<(bits+7)/8; ++i) take_byte(w,i,file);
-            }
-        }
-
-        return r;
+        return from_pbm_file(file);
     } catch(const bad_bitmap&) {
         throw bad_bitmap{std::string{"invalid PBM file: "} + filename};
     }
 }
 
-void bitmap::to_pbm_file(const char *filename) {
-    std::FILE *file = std::fopen(filename,"wb");
-    if(!file) throw std::system_error(errno,std::generic_category());
-    file_closer closer{file};
-
+void bitmap::to_pbm_file(std::FILE *file) {
     std::fprintf(file,"P4 %u %u\n",_width,_height);
 
     for(unsigned int y=0; y<_height; ++y) {
@@ -173,6 +173,34 @@ void bitmap::to_pbm_file(const char *filename) {
     }
 }
 
+void bitmap::to_pbm_file(const char *filename) {
+    std::FILE *file = std::fopen(filename,"wb");
+    if(!file) throw std::system_error(errno,std::generic_category());
+    file_closer closer{file};
+    to_pbm_file(file);
+}
+
+#ifdef _MSC_VER
+bitmap bitmap::from_pbm_file(const wchar_t *filename) {
+    std::FILE *file = _wfopen(filename,L"rb");
+    if(!file) throw std::system_error(errno,std::generic_category());
+    file_closer closer{file};
+
+    try {
+        return from_pbm_file(file);
+    } catch(const bad_bitmap&) {
+        throw bad_bitmap{"invalid PBM file"};
+    }
+}
+
+void bitmap::to_pbm_file(const wchar_t *filename) {
+    std::FILE *file = _wfopen(filename,L"wb");
+    if(!file) throw std::system_error(errno,std::generic_category());
+    file_closer closer{file};
+    to_pbm_file(file);
+}
+#endif
+
 bool bitmap::find_square(unsigned int size,unsigned int &_x,unsigned int &_y) const {
     assert(size > 0);
     for(unsigned int y=0; y < (_height-size+1); ++y) {
@@ -183,7 +211,7 @@ bool bitmap::find_square(unsigned int size,unsigned int &_x,unsigned int &_y) co
             mask >>= word_bit_size - size;
             const unsigned int img_end = _width - (xw*word_bit_size + size - 1);
             unsigned int i=0;
-            for(; i<std::min(word_bit_size - size,img_end); ++i) {
+            for(; i<std::min(word_bit_size - size + 1,img_end); ++i) {
                 for(unsigned int j=0; j<size; ++j) {
                     if(!bit_test(_data[(y+j)*_stride + xw],mask)) goto miss1;
                 }
@@ -206,7 +234,8 @@ bool bitmap::find_square(unsigned int size,unsigned int &_x,unsigned int &_y) co
 
               miss2:
                 mask <<= 1;
-                mask2 = (word_t(1) << (i + size - word_bit_size)) - 1;
+                mask2 <<= 1;
+                mask2 |= 1;
             }
         }
     }

@@ -8,7 +8,7 @@
 #include <span>
 #include <ranges>
 
-#include "int128.hpp"
+#include "large_ints.hpp"
 
 
 namespace poly_ops {
@@ -17,18 +17,8 @@ namespace poly_ops {
 by users of this library. */
 template<typename Coord> struct coord_ops {
     /** Certain operations require double the bits of the maximum coordinate
-    value to avoid overflow. This type can be specialized if the default type is
-    not wide enough for a given coordinate type. */
-    using long_t = std::conditional_t<(sizeof(Coord) < sizeof(long)),
-        long,
-#if POLY_OPS_HAVE_128BIT_INT
-        std::conditional_t<(sizeof(Coord) < sizeof(long long)),
-            long long,
-            basic_int128>
-#else
-        long long
-#endif
-        >;
+    value to avoid overflow. */
+    using long_t = large_ints::sized_int<sizeof(Coord)*2>;
 
     /** The coordinates of generated points are usually not integers. By
     default, they are represented by double before being rounded back to
@@ -38,12 +28,7 @@ template<typename Coord> struct coord_ops {
 
     /** Multiply without overflowing. */
     static long_t mul(Coord a,Coord b) {
-#if POLY_OPS_HAVE_128BIT_INT
-        if constexpr(std::is_same_v<long_t,basic_int128>) {
-            return basic_int128::mul(a,b);
-        }
-#endif
-        return static_cast<long_t>(a) * b;
+        return large_ints::mul(a,b);
     }
 
     /** Functions need to be defined that are equivalent to the following

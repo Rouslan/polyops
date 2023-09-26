@@ -8,20 +8,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(THREADS_PREFER_PTHREAD_FLAG True)
 
 
-#function(def_test_large_ints exe_name)
-#    add_executable(${exe_name} test_large_ints.cpp)
-#    target_link_libraries(${exe_name} PRIVATE Catch2::Catch2WithMain)
-#    target_compile_options(${exe_name} PRIVATE ${GMP_CFLAGS})
-#    target_link_options(${exe_name} PRIVATE ${GMP_LDFLAGS})
-#endfunction()
-
-
 find_package(Boost 1.69.0 COMPONENTS unit_test_framework)
 find_package(Threads)
 
 
 if (MSVC)
     add_compile_options(/W4)
+    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 else()
     add_compile_options(-Wall -Wextra -Wundef -Wconversion -Wsign-conversion -pedantic -fvisibility=hidden)
 endif()
@@ -39,16 +32,25 @@ if(Boost_FOUND)
     target_compile_definitions(unit_tests PRIVATE BOOST_TEST_DYN_LINK)
 endif()
 
-#find_package(PkgConfig)
+find_package(PkgConfig)
+if(PKG_CONFIG_FOUND)
+    pkg_check_modules(GMP gmpxx>=6.2.0)
+endif()
 
-#if(PKG_CONFIG_FOUND)
-#    pkg_check_modules(GMP gmpxx>=6.2.0)
-#    if(GMP_FOUND)
-#        def_test_large_ints(test_large_ints_ext)
-#        def_test_large_ints(test_large_ints_noext)
-#        target_compile_definitions(test_large_ints_noext PRIVATE POLY_OPS_NO_COMPILER_EXTENSIONS)
-#    endif()
-#endif()
+function(def_test_large_ints exe_name)
+    add_executable(${exe_name} test_large_ints.cpp)
+    if(GMP_FOUND)
+        target_compile_definitions(${exe_name} PRIVATE HAVE_GMP_LIBRARY)
+        target_compile_options(${exe_name} PRIVATE ${GMP_CFLAGS})
+        target_link_options(${exe_name} PRIVATE ${GMP_LDFLAGS})
+    endif()
+endfunction()
+
+def_test_large_ints(test_large_ints_ext)
+def_test_large_ints(test_large_ints_noext)
+target_compile_definitions(test_large_ints_noext PRIVATE POLY_OPS_NO_COMPILER_EXTENSIONS)
+add_test(NAME TestLargeInts COMMAND test_large_ints_ext)
+add_test(NAME TestLargeIntsNoExt COMMAND test_large_ints_noext)
 
 add_executable(simple simple.cpp)
 
@@ -59,7 +61,7 @@ add_test(NAME IntersectionBitmapTest COMMAND btest ${test_input_file} intersecti
 add_test(NAME XorBitmapTest COMMAND btest ${test_input_file} xor)
 add_test(NAME DifferenceBitmapTest COMMAND btest ${test_input_file} difference)
 
-# doesn't work
+# doesn't work yet
 #add_test(NAME NormalizeBitmapTest COMMAND btest ${test_input_file} normalize)
 
 add_executable(whitebox white_box.cpp)
@@ -68,4 +70,4 @@ add_test(NAME WhiteBox COMMAND whitebox -t2000 -n50000 -p50)
 add_executable(gen_discontinuous gen_discontinuous.cpp bitmap.cpp)
 
 add_custom_target(test_bin)
-add_dependencies(test_bin btest whitebox)
+add_dependencies(test_bin btest whitebox test_large_ints_ext test_large_ints_noext)

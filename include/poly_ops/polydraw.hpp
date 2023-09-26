@@ -20,8 +20,8 @@ namespace detail {
 
 template<typename T,unsigned int SizeNum=1,unsigned int SizeDenom=SizeNum>
 struct fraction {
-    using numerator_t = poly_ops_new::sized_int<sizeof(T)*SizeNum>;
-    using denominator_t = poly_ops_new::sized_int<sizeof(T)*SizeDenom>;
+    using numerator_t = large_ints::sized_int<sizeof(T)*SizeNum>;
+    using denominator_t = large_ints::sized_int<sizeof(T)*SizeDenom>;
 
     numerator_t num;
     denominator_t denom;
@@ -30,7 +30,7 @@ struct fraction {
     fraction(const fraction&) noexcept = default;
     fraction(const numerator_t &_num,const denominator_t &_denom=1) noexcept : num{_num}, denom{_denom} {
         assert(denom != 0);
-        if(poly_ops_new::negative(denom)) {
+        if(large_ints::negative(denom)) {
             num = -num;
             denom = -denom;
         }
@@ -46,19 +46,19 @@ struct fraction {
 
     friend auto operator<=>(const fraction &a,const fraction &b) noexcept {
         assert(a.denom > 0 && b.denom > 0);
-        return poly_ops_new::mul(a.num,b.denom) <=> poly_ops_new::mul(b.num,a.denom);
+        return large_ints::mul(a.num,b.denom) <=> large_ints::mul(b.num,a.denom);
     }
     friend auto operator<=>(const fraction &a,T b) noexcept {
         assert(a.denom > 0);
-        return a.num <=> poly_ops_new::mul(b,a.denom);
+        return a.num <=> large_ints::mul(b,a.denom);
     }
     friend auto operator==(const fraction &a,const fraction &b) noexcept {
         assert(a.denom > 0 && b.denom > 0);
-        return poly_ops_new::mul(a.num,b.denom) == poly_ops_new::mul(b.num,a.denom);
+        return large_ints::mul(a.num,b.denom) == large_ints::mul(b.num,a.denom);
     }
     friend auto operator==(const fraction &a,T b) noexcept {
         assert(a.denom > 0);
-        return a.num <=> poly_ops_new::mul(b,a.denom);
+        return a.num <=> large_ints::mul(b,a.denom);
     }
 };
 
@@ -166,7 +166,7 @@ bool intersects(
     const cached_segment<Coord> &s2,
     whole_and_frac<Coord,2> &intr_y)
 {
-    using namespace poly_ops_new;
+    using namespace large_ints;
 
     const Coord x1 = s1.pa.x();
     const Coord y1 = s1.pa.y();
@@ -196,7 +196,7 @@ bool intersects(
 }
 
 template<typename T> fraction<T,2,1> x_intercept(const poly_ops::point_t<T> &start,const poly_ops::point_t<T> &end,T y) noexcept {
-    using namespace poly_ops_new;
+    using namespace large_ints;
     return {mul(start.x(),y - end.y()) + mul(end.x(),start.y() - y),
         start.y() - end.y()};
 }
@@ -427,7 +427,7 @@ template<typename T> T clamp(T x,std::type_identity_t<T> lo,std::type_identity_t
 }
 
 template<typename T,unsigned int NumSize,unsigned int DenomSize> T to_coord(const fraction<T,NumSize,DenomSize> &x,std::type_identity_t<T> lo,std::type_identity_t<T> hi) {
-    return clamp(static_cast<T>(poly_ops_new::unmul<1>(x.num,x.denom).quot),lo,hi);
+    return clamp(static_cast<T>(large_ints::unmul<1>(x.num,x.denom).quot),lo,hi);
 }
 
 bool should_fill(fill_rule_t rule,long winding) {

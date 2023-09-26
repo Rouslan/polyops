@@ -13,6 +13,7 @@ standard C++, define POLY_OPS_NO_COMPILER_EXTENSIONS. */
 #include <algorithm>
 #include <compare>
 #include <bit>
+#include <cassert>
 
 
 /* The __int128 type is available */
@@ -115,7 +116,7 @@ x86-64 */
 #endif
 
 
-namespace poly_ops_new {
+namespace poly_ops::large_ints {
 
 #if _POLY_OPS_IMPL_HAVE_INT128BIT
 namespace detail {
@@ -344,6 +345,16 @@ public:
 template<unsigned int N> using compound_xint_ref = _compound_xint_ref<N,false>;
 template<unsigned int N> using const_compound_xint_ref = _compound_xint_ref<N,true>;
 
+namespace detail {
+    template<std::floating_point T,unsigned int N> T unsigned_to_float(const_compound_xint_ref<N> x) noexcept {
+        if constexpr(N > 1) {
+            return std::ldexp(static_cast<T>(x.hi()),32*N) + unsigned_to_float<T,N-1>(x.lo());
+        } else {
+            return static_cast<T>(x.hi());
+        }
+    }
+}
+
 template<typename T,unsigned int N,bool Signed> concept safe_comp_or_single_i
     = detail::int_count<Signed,T> <= N && (Signed || detail::unsigned_type<T>);
 
@@ -356,14 +367,23 @@ private:
 
 public:
     compound_xint() noexcept = default;
-    template<comp_or_single_i T> constexpr compound_xint(full_uint _hi,T _lo) noexcept {
+
+    constexpr compound_xint(full_uint b) noexcept requires (N == 1) : _data{b} {}
+
+    template<comp_or_single_i T> requires (N > 1)
+    constexpr compound_xint(full_uint _hi,T _lo) noexcept {
         lo().set(_lo);
         hi() = _hi;
     }
 
     /* SFINAE doesn't seem to hold when using detail::int_count instead of the longer equivalent, under Clang 16.0.6 */
     template<comp_or_single_i T> explicit(detail::_int_count<Signed,std::decay_t<T>>::value > N || (detail::signed_type<T> && !Signed)) constexpr
-    compound_xint(const T &b) : compound_xint{detail::compi_hi<N>(b),detail::compi_lo<N>(b)} {}
+    compound_xint(const T &b) {
+        if constexpr(N > 1) {
+            lo().set(detail::compi_lo<N>(b));
+        }
+        hi() = detail::compi_hi<N>(b);
+    }
 
     /*template<std::floating_point T> explicit constexpr compound_int(T b) noexcept
         : _lo(static_cast<full_uint>(static_cast<full_int>(std::fmod(b,T(0x1p64))))),
@@ -373,20 +393,39 @@ public:
     constexpr compound_xint &operator=(const compound_xint&) noexcept = default;
 
     template<safe_comp_or_single_i<N,Signed> T> compound_xint &operator=(const T &b) noexcept {
-        lo() = detail::compi_lo<N>(b);
+        if constexpr(N > 1) {
+            lo() = detail::compi_lo<N>(b);
+        }
         hi() = detail::compi_hi<N>(b);
         return *this;
     }
 
-    compound_xint operator-() const noexcept requires Signed { return full_uint(0) - *this; }
+    compound_xint operator-() const noexcept requires Signed {
+        if constexpr(N > 1) {
+            return full_uint(0) - *this;
+        } else {
+            return -static_cast<full_xint<Signed>>(hi());
+        }
+    }
 
     template<detail::integral T> explicit operator T() const noexcept {
         return detail::cast<T>(*this);
     }
-    /*template<std::floating_point T> explicit operator T() const noexcept {
-        return std::ldexp(static_cast<T>(static_cast<full_int>(hi())),32*N)
-            + static_cast<T>(lo());
-    }*/
+    template<std::floating_point T> explicit operator T() const noexcept {
+        if constexpr(N > 1) {
+            if constexpr(Signed) {
+                if(negative()) {
+                    return -detail::unsigned_to_float<T,N>(-(*this));
+                } else {
+                    return detail::unsigned_to_float<T,N>(*this);
+                }
+            } else {
+                return detail::unsigned_to_float<T,N>(*this);
+            }
+        } else {
+            return static_cast<T>(static_cast<full_xint<Signed>>(_data[0]));
+        }
+    }
 
     constexpr bool negative() const noexcept {
         return Signed && static_cast<full_int>(hi()) < 0;
@@ -399,13 +438,13 @@ public:
         return false;
     }
 
-    _POLY_OPS_ARTIFICIAL constexpr operator compound_xint_ref<N>() { return compound_xint_ref<N>{_data}; }
-    _POLY_OPS_ARTIFICIAL constexpr operator const_compound_xint_ref<N>() const { return const_compound_xint_ref<N>{_data}; }
+    _POLY_OPS_ARTIFICIAL constexpr operator compound_xint_ref<N>() noexcept { return compound_xint_ref<N>{_data}; }
+    _POLY_OPS_ARTIFICIAL constexpr operator const_compound_xint_ref<N>() const noexcept { return const_compound_xint_ref<N>{_data}; }
 
     _POLY_OPS_ARTIFICIAL constexpr full_uint hi() const noexcept { return _data[N-1]; }
     _POLY_OPS_ARTIFICIAL constexpr full_uint &hi() noexcept { return _data[N-1]; }
-    _POLY_OPS_ARTIFICIAL constexpr auto lo() const noexcept { return const_compound_xint_ref<N-1>{_data}; }
-    _POLY_OPS_ARTIFICIAL constexpr auto lo() noexcept { return compound_xint_ref<N-1>{_data}; }
+    _POLY_OPS_ARTIFICIAL constexpr auto lo() const noexcept requires(N > 1) { return const_compound_xint_ref<N-1>{_data}; }
+    _POLY_OPS_ARTIFICIAL constexpr auto lo() noexcept requires(N > 1) { return compound_xint_ref<N-1>{_data}; }
 
     _POLY_OPS_FORCE_INLINE constexpr full_uint operator[](unsigned int i) const noexcept {
         assert(i < N);
@@ -424,74 +463,6 @@ public:
     _POLY_OPS_ARTIFICIAL full_uint *begin() noexcept { return _data; }
     _POLY_OPS_ARTIFICIAL const full_uint *end() const noexcept { return _data + N; }
     _POLY_OPS_ARTIFICIAL full_uint *end() noexcept { return _data + N; }
-};
-
-template<bool Signed> class compound_xint<1,Signed> {
-public:
-    using value_type = full_uint;
-
-private:
-    full_uint _data[1];
-
-public:
-    compound_xint() noexcept = default;
-    constexpr compound_xint(full_uint b) noexcept : _data{b} {}
-
-    explicit(!Signed) constexpr compound_xint(full_int b) noexcept
-        : _data{static_cast<full_uint>(b)} {}
-
-    template<comp_or_single_i T> explicit(detail::int_count<Signed,T> > 1 || (detail::signed_type<T> && !Signed)) constexpr
-    compound_xint(const T &b) : _data{detail::compi_hi<1>(b)} {}
-
-    template<std::floating_point T> explicit constexpr compound_xint(T b) noexcept
-        : _data{static_cast<full_uint>(static_cast<full_int>(b))} {}
-
-    constexpr compound_xint(const compound_xint&) noexcept = default;
-
-    compound_xint &operator=(const compound_xint &b) noexcept = default;
-
-    template<safe_comp_or_single_i<1,Signed> T> compound_xint &operator=(const T &b) noexcept {
-        hi() = detail::compi_hi<1>(b);
-        return *this;
-    }
-
-    compound_xint operator-() const noexcept requires Signed { return compound_xint(-static_cast<full_int>(hi())); }
-
-    template<detail::builtin_number T> explicit operator T() const noexcept {
-        return static_cast<T>(static_cast<full_int>(hi()));
-    }
-
-    constexpr bool negative() const noexcept {
-        return Signed && static_cast<full_int>(hi()) < 0;
-    }
-
-    explicit constexpr operator bool() const noexcept {
-        return hi() != 0;
-    }
-
-    _POLY_OPS_ARTIFICIAL constexpr operator compound_xint_ref<1>() { return compound_xint_ref<1>{_data}; }
-    _POLY_OPS_ARTIFICIAL constexpr operator const_compound_xint_ref<1>() const { return const_compound_xint_ref<1>{_data}; }
-
-    _POLY_OPS_ARTIFICIAL constexpr full_uint hi() const noexcept { return _data[0]; }
-    _POLY_OPS_ARTIFICIAL constexpr full_uint &hi() noexcept { return _data[0]; }
-
-    _POLY_OPS_FORCE_INLINE constexpr full_uint operator[](unsigned int i) const noexcept {
-        assert(i == 0);
-        return _data[i];
-    }
-    _POLY_OPS_FORCE_INLINE constexpr full_uint &operator[](unsigned int i) noexcept {
-        assert(i == 0);
-        return _data[i];
-    }
-
-    std::size_t size() const { return 1; }
-
-    _POLY_OPS_ARTIFICIAL const full_uint *data() const noexcept { return _data; }
-    _POLY_OPS_ARTIFICIAL full_uint *data() noexcept { return _data; }
-    _POLY_OPS_ARTIFICIAL const full_uint *begin() const noexcept { return _data; }
-    _POLY_OPS_ARTIFICIAL full_uint *begin() noexcept { return _data; }
-    _POLY_OPS_ARTIFICIAL const full_uint *end() const noexcept { return _data + 1; }
-    _POLY_OPS_ARTIFICIAL full_uint *end() noexcept { return _data + 1; }
 };
 
 namespace detail {
@@ -946,7 +917,7 @@ template<typename T,typename U> std::strong_ordering cmp(const T &a,const U &b) 
         full_uint diff = 0;
         carry_t c;
         if constexpr(Signed) {
-            carry_t c = subborrow_or<N-1>(compi_lo<N>(a),compi_lo<N>(b),diff);
+            c = subborrow_or<N-1>(compi_lo<N>(a),compi_lo<N>(b),diff);
 
             auto a_hi = compi_hi<N,true>(a);
             auto b_hi = compi_hi<N,true>(b);
@@ -1148,13 +1119,12 @@ template<unsigned int Nr,typename T,typename U,modulo_t::value_t Mod=modulo_t::t
 auto unmul(const T &a,const U &b,modulo_t::type<Mod> = {}) noexcept {
     using namespace detail;
 
-    constexpr unsigned int Na = detail::int_count<Signed,T>;
     constexpr unsigned int Nb = detail::int_count<Signed,U>;
 
     quot_rem<compound_xint<Nr,Signed>,compound_xint<Nb,Signed>> r;
 
 #if _POLY_OPS_IMPL_HAVE_DIVX || _POLY_OPS_IMPL_GCC_X86_ASM
-    if constexpr(Nr == 1 && Na == 2 && Nb == 1) {
+    if constexpr(Nr == 1 && detail::int_count<Signed,T> == 2 && Nb == 1) {
 #  if _POLY_OPS_IMPL_HAVE_DIVX
         if constexpr(Signed) {
             r.quot = _POLY_OPS_MSVC_DIV(
@@ -1351,7 +1321,7 @@ auto divmod(const T &a,const U &b,modulo_t::type<Mod>) noexcept {
         if constexpr(Mod == modulo_t::truncate_v) {
             if(sa ^ sb) r.quot = -r.quot;
             if(sa) r.rem = -r.rem;
-        } else if(Mod == modulo_t::euclid_v) {
+        } else if constexpr(Mod == modulo_t::euclid_v) {
             if(sa ^ sb) {
                 r.rem = abs(b) - r.rem;
                 r.quot = -1 - r.quot;
@@ -1459,7 +1429,7 @@ namespace detail {
     }
 } // namespace detail
 
-/* Parse a hexidecimal value and return a compound_int instance with the
+/* Parse a hexadecimal value and return a compound_int instance with the
 smallest size that can fit all the digits, including Leading zeros (after the
 initial "0x"). */
 template<char... C> constexpr auto operator""_compi() {

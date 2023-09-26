@@ -174,6 +174,16 @@ cdef extern from *:
     PyObject *pylong_from_(unsigned long x) { return PyLong_FromUnsignedLong(x); }
     PyObject *pylong_from_(long long x) { return PyLong_FromLongLong(x); }
     PyObject *pylong_from_(unsigned long long x) { return PyLong_FromUnsignedLongLong(x); }
+    PyObject *pylong_from_(const poly_ops::large_ints::compound_int<2> &x) {
+    #if NPY_BYTE_ORDER == NPY_LITTLE_ENDIAN
+        std::uint64_t bits[2] = {x[0],x[1]};
+        const int little_endian = 1;
+    #else
+        std::uint64_t bits[2] = {x[1],x[0]};
+        const int little_endian = 0;
+    #endif
+        return _PyLong_FromByteArray(reinterpret_cast<const unsigned char*>(bits),16,little_endian,1);
+    }
 
     PyObject *_winding_dir(PyArrayObject *ar,NPY_CASTING casting) noexcept {
         if(PyArray_SIZE(ar) == 0) return pylong_from_(0l);
@@ -195,24 +205,7 @@ cdef extern from *:
             sink(p);
         }
 
-        long_coord_t result = sink.close();
-
-    #if POLY_OPS_HAVE_128BIT_INT
-
-    #if NPY_BYTE_ORDER == NPY_LITTLE_ENDIAN
-        std::uint64_t bits[2] = {result.lo(),result.hi()};
-        const int little_endian = 1;
-    #else
-        std::uint64_t bits[2] = {result.hi(),result.lo()};
-        const int little_endian = 0;
-    #endif
-        return _PyLong_FromByteArray(reinterpret_cast<const unsigned char*>(bits),16,little_endian,1);
-
-    #else
-
-        return pylong_from_(result);
-
-    #endif
+        return pylong_from_(sink.close());
     }
 
     PyObject *obj_to_dtype_opt(PyObject *obj) noexcept {

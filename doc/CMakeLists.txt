@@ -16,7 +16,7 @@ if(Python3_FOUND)
             index.rst
             cpp/base.rst
             cpp/clip.rst
-            cpp/int128.rst
+            cpp/large_ints.rst
             cpp/index.rst
             py/index.rst
             py/polyops.rst

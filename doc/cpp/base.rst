@@ -141,10 +141,8 @@ Types
         Certain operations require multiplying two coordinate values and thus
         need double the bits of the maximum coordinate value to avoid overflow.
 
-        By default, if the compile target is a 64-bit platform and `Coord` is a
-        64 bit type, this is :cpp:class:`basic_int128`. On other platforms, if
-        `Coord` is not smaller than `long`, this is `long long`. Otherwise this
-        is `long`.
+        By default, if `Coord` is a 64 bit type, this is
+        :cpp:type:`large_ints::compound_int`.
 
         This can be specialized as a user-defined type.
 

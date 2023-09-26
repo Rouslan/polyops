@@ -66,9 +66,16 @@ public:
     /* This is almost a conforming binary PBM parser. It only allows comments
     around the mandatory whitespace characters, not before the magic number or
     in the middle of tokens. */
+    static bitmap from_pbm_file(std::FILE *file);
     static bitmap from_pbm_file(const char *filename);
 
+    void to_pbm_file(std::FILE *file);
     void to_pbm_file(const char *filename);
+
+#ifdef _MSC_VER
+    static bitmap from_pbm_file(const wchar_t *filename);
+    void to_pbm_file(const wchar_t *filename);
+#endif
 
     bool find_square(unsigned int size,unsigned int &x,unsigned int &y) const;
     bool has_square(unsigned int size) const;

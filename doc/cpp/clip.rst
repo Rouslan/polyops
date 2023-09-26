@@ -1,4 +1,4 @@
-poly_ops/clipper.hpp
+poly_ops/clip.hpp
 =====================
 
 .. cpp:namespace:: poly_ops
