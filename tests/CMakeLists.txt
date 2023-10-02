@@ -59,9 +59,8 @@ add_test(NAME UnionBitmapTest COMMAND btest ${test_input_file} union)
 add_test(NAME IntersectionBitmapTest COMMAND btest ${test_input_file} intersection)
 add_test(NAME XorBitmapTest COMMAND btest ${test_input_file} xor)
 add_test(NAME DifferenceBitmapTest COMMAND btest ${test_input_file} difference)
-
-# doesn't work yet
-#add_test(NAME NormalizeBitmapTest COMMAND btest ${test_input_file} normalize)
+add_test(NAME NormalizeBitmapTest COMMAND btest ${test_input_file} normalize)
+add_test(NAME OffsetBitmapTest COMMAND btest ${test_input_file} offset)
 
 add_executable(whitebox white_box.cpp)
 add_test(NAME WhiteBox COMMAND whitebox -t2000 -n50000 -p50)

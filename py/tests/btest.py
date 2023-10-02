@@ -14,12 +14,12 @@ DUMP_FAILURE_DIFF = False
 # Technically, comments can appear anywhere, including inside 'tokens', not just
 # around tokens, but we only need to open our own files, so this is good enough.
 # The 'P4' at the start is omitted because it is checked separately.
-RE_PBM_HEADER = re.compile(b"""
-    (?:#.*[\n\r])*\\s(?:#.*[\n\r]|\\s)*
-    (\\d+)
-    (?:#.*[\n\r])*\\s(?:#.*[\n\r]|\\s)*
-    (\\d+)
-    (?:#.*[\n\r])*\\s""",re.VERBOSE)
+RE_PBM_HEADER = re.compile(
+    br"(?:#.*[\n\r])*\s(?:#.*[\n\r]|\s)*"
+    + br"(\d+)"
+    + br"(?:#.*[\n\r])*\s(?:#.*[\n\r]|\s)*"
+    + br"(\d+)"
+    + br"(?:#.*[\n\r])*\s")
 
 
 test_data_files = importlib.resources.files(test_data)
@@ -64,7 +64,7 @@ def has_square(data):
 class TestCase:
     def __init__(self):
         self.set_data = ([],[])
-        self.op_files = [None] * len(polyops.BoolOp)
+        self.op_files = [{} for i in range(len(polyops.BoolOp))]
 
 class ParseError(Exception):
     pass
@@ -82,7 +82,7 @@ def parse_tests():
 
     re_array_assign_start = re.compile(r'[ \t]*:[ \t]*\[')
     re_array_assign_end = re.compile(r'([0-9 +\-]*)(\])[ \t\n\r]*(?:$|#)')
-    re_op_assign = re.compile(r'[ \t]*:[ \t]*([0-9a-zA-Z]+)[ \t\n\r]*(?:$|#)')
+    re_op_assign = re.compile(r'([+-][0-9]+|)[ \t]*:[ \t]*([0-9a-zA-Z]+)[ \t\n\r]*(?:$|#)')
 
     def end_array_assign(m,lnum):
         nonlocal touched, partial_line
@@ -114,7 +114,7 @@ def parse_tests():
                             m = re_op_assign.match(line,len(op.name))
                             if not m:
                                 raise ParseError(i)
-                            tests[-1].op_files[op] = m[1]
+                            tests[-1].op_files[op][int(m[1],10) if m[1] else 0] = m[2]
                             touched = True
                             break
                     else:
@@ -145,32 +145,33 @@ class BitmapTestCase(unittest.TestCase):
         cls.clip = polyops.Clipper()
         cls.rast = polydraw.Rasterizer()
 
-    def _run_op(self,op):
+    def _run_op(self,op,nonzero_offset=False):
         for item in self.data:
-            if item.op_files[op] is None: continue
+            for offset,file_id in item.op_files[op].items():
+                if (offset == 0) == nonzero_offset: continue
+                if offset:
+                    raise Exception('not implemented yet')
 
-            file_id = item.op_files[op]
+                with self.subTest(file=file_id):
+                    imgfilename = file_id + '.pbm'
+                    target_img = read_pbm(imgfilename,(test_data_files/imgfilename).read_bytes())
+                    test_img = np.zeros_like(target_img)
 
-            with self.subTest(file=file_id):
-                imgfilename = file_id + '.pbm'
-                target_img = read_pbm(imgfilename,(test_data_files/imgfilename).read_bytes())
-                test_img = np.zeros_like(target_img)
+                    self.clip.add_loops_subject(item.set_data[polyops.BoolSet.subject])
+                    self.clip.add_loops_clip(item.set_data[polyops.BoolSet.clip])
 
-                self.clip.add_loops_subject(item.set_data[polyops.BoolSet.subject])
-                self.clip.add_loops_clip(item.set_data[polyops.BoolSet.clip])
+                    self.rast.reset()
+                    self.rast.add_loops(self.clip.execute_flat(op))
+                    for x1,x2,y,wind in self.rast.scan_lines(test_img.shape[1],test_img.shape[0]):
+                        if wind > 0:
+                            test_img[y,x1:x2+1] = 1
 
-                self.rast.reset()
-                self.rast.add_loops(self.clip.execute_flat(op))
-                for x1,x2,y,wind in self.rast.scan_lines(test_img.shape[1],test_img.shape[0]):
-                    if wind > 0:
-                        test_img[y,x1:x2+1] = 1
-
-                diff = test_img != target_img
-                if has_square(diff):
-                    if DUMP_FAILURE_DIFF:
-                        write_pbm(file_id + "_mine.pbm",test_img)
-                        write_pbm(file_id + "_diff.pbm",diff)
-                    self.fail('output does not match file')
+                    diff = test_img != target_img
+                    if has_square(diff):
+                        if DUMP_FAILURE_DIFF:
+                            write_pbm(file_id + "_mine.pbm",test_img)
+                            write_pbm(file_id + "_diff.pbm",diff)
+                        self.fail('output does not match file')
 
     def test_union(self):
         self._run_op(polyops.BoolOp.union)
@@ -184,9 +185,8 @@ class BitmapTestCase(unittest.TestCase):
     def test_difference(self):
         self._run_op(polyops.BoolOp.difference)
 
-    # this doesn't work yet
-    #def test_normalize(self):
-    #    self._run_op(polyops.BoolOp.normalize)
+    def test_normalize(self):
+        self._run_op(polyops.BoolOp.normalize)
 
 if __name__ == '__main__':
     unittest.main()

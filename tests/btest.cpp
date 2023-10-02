@@ -40,6 +40,7 @@ S           ::= [ \t]+
 */
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <algorithm>
 #include <optional>
@@ -48,11 +49,13 @@ S           ::= [ \t]+
 #include <system_error>
 #include <functional>
 #include <iostream>
+#include <charconv>
 
 #include "bitmap.hpp"
 #include "../include/poly_ops/polydraw.hpp"
 #include "../include/poly_ops/base.hpp"
 #include "../include/poly_ops/clip.hpp"
+#include "../include/poly_ops/offset.hpp"
 
 
 template<typename T> constexpr T MAX_IMG_DIM = 1000;
@@ -62,13 +65,18 @@ constexpr std::size_t MAX_INT_STR_SIZE = 9;
 constexpr std::size_t MAX_ID_STR_SIZE = 36;
 
 constexpr unsigned int DIFF_FAIL_SQUARE_SIZE = 5;
-constexpr bool DUMP_FAILURE_DIFF = false;
+
+constexpr int OFFSET_ARC_STEP_SIZE = 3;
+
+constexpr int TEST_ALL = -1;
+constexpr int TEST_OFFSET = -2;
 
 
 using coord_t = long;
 
 #include "stream_output.hpp"
 
+bool dump_failure_diff = false;
 
 class parse_input_error : public std::exception {
 public:
@@ -86,10 +94,15 @@ public:
     }
 };
 
+struct op_file_t {
+    int offset;
+    std::string file;
+};
+
 template<typename Coord> struct test_case {
     std::vector<std::vector<poly_ops::point_t<Coord>>> subject;
     std::vector<std::vector<poly_ops::point_t<Coord>>> clip;
-    std::string op_files[static_cast<int>(poly_ops::bool_op::normalize)+1];
+    std::vector<op_file_t> op_files[static_cast<int>(poly_ops::bool_op::normalize)+1];
 };
 
 template<typename Coord> struct parse_state {
@@ -178,23 +191,6 @@ template<typename Coord> struct parse_state {
         }
     }
 
-    void read_field(const char *name) {
-        while(*name) {
-            if(*name++ != next_c()) {
-                throw parse_input_error{"unknown field name on line %i",line};
-            }
-        }
-        next_c();
-        if((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
-            throw parse_input_error{"unknown field name on line %i",line};
-        }
-
-        skip_whitespace();
-        if(c != ':') unexpected_char();
-        next_c();
-        skip_whitespace();
-    }
-
     unsigned int read_uint() {
         char digits[MAX_INT_STR_SIZE];
         std::size_t str_size = 0;
@@ -265,6 +261,42 @@ template<typename Coord> struct parse_state {
         }
     }
 
+    void read_field_name(const char *end) {
+        while(*end) {
+            if(*end++ != next_c()) {
+                throw parse_input_error{"unknown field name on line %i",line};
+            }
+        }
+        next_c();
+        if((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+            throw parse_input_error{"unknown field name on line %i",line};
+        }
+    }
+
+    void read_colon() {
+        skip_whitespace();
+        if(c != ':') unexpected_char();
+        next_c();
+        skip_whitespace();
+    }
+
+    void read_op_entry(const char *end,poly_ops::bool_op op) {
+        read_field_name(end);
+
+        int offset = 0;
+        if(c == '+' || c == '-') offset = read_int();
+
+        read_colon();
+
+        auto &file_set = tests.back().op_files[static_cast<int>(op)];
+        auto i = std::ranges::lower_bound(file_set,offset,{},[](const op_file_t &o){ return o.offset; });
+        if(i != file_set.end() && i->offset == offset) *i = {offset,read_id()};
+        else file_set.emplace(i,offset,read_id());
+        skip_whitespace();
+        read_newline();
+        touched = true;
+    }
+
     void run(std::FILE *_file) {
         file = _file;
         line = 1;
@@ -275,49 +307,31 @@ template<typename Coord> struct parse_state {
         for(;;) {
             switch(c) {
             case 's':
-                read_field("ubject");
+                read_field_name("ubject");
+                read_colon();
                 tests.back().subject.push_back(read_point_array());
                 touched = true;
                 break;
             case 'c':
-                read_field("lip");
+                read_field_name("lip");
+                read_colon();
                 tests.back().clip.push_back(read_point_array());
                 touched = true;
                 break;
             case 'u':
-                read_field("nion");
-                tests.back().op_files[static_cast<int>(poly_ops::bool_op::union_)] = read_id();
-                skip_whitespace();
-                read_newline();
-                touched = true;
+                read_op_entry("nion",poly_ops::bool_op::union_);
                 break;
             case 'd':
-                read_field("ifference");
-                tests.back().op_files[static_cast<int>(poly_ops::bool_op::difference)] = read_id();
-                skip_whitespace();
-                read_newline();
-                touched = true;
+                read_op_entry("ifference",poly_ops::bool_op::difference);
                 break;
             case 'i':
-                read_field("ntersection");
-                tests.back().op_files[static_cast<int>(poly_ops::bool_op::intersection)] = read_id();
-                skip_whitespace();
-                read_newline();
-                touched = true;
+                read_op_entry("ntersection",poly_ops::bool_op::intersection);
                 break;
             case 'x':
-                read_field("or");
-                tests.back().op_files[static_cast<int>(poly_ops::bool_op::xor_)] = read_id();
-                skip_whitespace();
-                read_newline();
-                touched = true;
+                read_op_entry("or",poly_ops::bool_op::xor_);
                 break;
             case 'n':
-                read_field("ormalize");
-                tests.back().op_files[static_cast<int>(poly_ops::bool_op::normalize)] = read_id();
-                skip_whitespace();
-                read_newline();
-                touched = true;
+                read_op_entry("ormalize",poly_ops::bool_op::normalize);
                 break;
             case '-':
                 do {
@@ -366,15 +380,20 @@ bool test_op(
     poly_ops::draw::rasterizer<coord_t> &rast,
     const test_case<coord_t> &test,
     poly_ops::bool_op op,
-    const std::string &file_id,
+    const op_file_t &entry,
     const std::filesystem::path &folder)
 {
-    auto target_img = bitmap::from_pbm_file((folder / (file_id + ".pbm")).c_str());
+    auto target_img = bitmap::from_pbm_file((folder / (entry.file + ".pbm")).c_str());
     bitmap test_img{target_img.width(),target_img.height()};
     test_img.clear();
-    
-    clip.add_loops_subject(test.subject);
-    clip.add_loops_clip(test.clip);
+
+    if(entry.offset) {
+        add_offset_loops_subject(clip,test.subject,entry.offset,OFFSET_ARC_STEP_SIZE);
+        add_offset_loops_clip(clip,test.clip,entry.offset,OFFSET_ARC_STEP_SIZE);
+    } else {
+        clip.add_loops_subject(test.subject);
+        clip.add_loops_clip(test.clip);
+    }
 
     auto clipped = clip.execute<false>(op);
     //for(auto loop : clipped) {
@@ -395,10 +414,10 @@ bool test_op(
             stderr,
             "failure with operation \"%s\" compared to file \"%s\"\n",
             bool_op_names[static_cast<int>(op)],
-            file_id.c_str());
-        if(DUMP_FAILURE_DIFF) {
-            test_img.to_pbm_file((file_id + "_mine.pbm").c_str());
-            diff.to_pbm_file((file_id + "_diff.pbm").c_str());
+            entry.file.c_str());
+        if(dump_failure_diff) {
+            test_img.to_pbm_file((entry.file + "_mine.pbm").c_str());
+            diff.to_pbm_file((entry.file + "_diff.pbm").c_str());
         }
         return false;
     }
@@ -415,14 +434,28 @@ void check_square_finder(const std::filesystem::path &folder) {
     }
 }
 
+bool str_to_bool(const char *str) {
+    if(!str) return false;
+    int x;
+    const char *end = str+std::strlen(str);
+    auto r = std::from_chars(str,end,x);
+    return r.ptr == end && x;
+}
+
 int main(int argc,char *argv[]) {
+    dump_failure_diff = str_to_bool(std::getenv("DUMP_FAILURE_DIFF"));
+
     if(argc != 2 && argc != 3) {
         std::fprintf(stderr,"exactly one or two arguments are required\n");
         return 2;
     }
 
-    int operation = -1;
+    int operation = TEST_ALL;
     if(argc > 2) {
+        if(std::strcmp("offset",argv[2]) == 0) {
+            operation = TEST_OFFSET;
+            goto found;
+        }
         for(int i=0; i<OP_COUNT; ++i) {
             if(std::strcmp(bool_op_names[i],argv[2]) == 0) {
                 operation = i;
@@ -462,9 +495,13 @@ int main(int argc,char *argv[]) {
             for(int i=0; i<OP_COUNT; ++i) {
                 if(!test.op_files[i].empty()) {
                     has_one = true;
-                    if(operation != -1 && operation != i) continue;
-                    successes += test_op(clip,rast,test,static_cast<poly_ops::bool_op>(i),test.op_files[i],test_source);
-                    tests += 1;
+                    if(operation > -1 && operation != i) continue;
+                    for(auto &op_file : test.op_files[i]) {
+                        if(operation == TEST_ALL || (op_file.offset != 0) == (operation == TEST_OFFSET)) {
+                            successes += test_op(clip,rast,test,static_cast<poly_ops::bool_op>(i),op_file,test_source);
+                            tests += 1;
+                        }
+                    }
                 }
             }
             if(!has_one) {

@@ -18,6 +18,7 @@ if(Python3_FOUND)
             cpp/clip.rst
             cpp/large_ints.rst
             cpp/index.rst
+            cpp/offset.rst
             py/index.rst
             py/polyops.rst
         VERBATIM)

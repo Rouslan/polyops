@@ -1,4 +1,4 @@
-/* A basic polygon rasterizer */
+/* A very basic polygon rasterizer */
 
 #ifndef polydraw_hpp
 #define polydraw_hpp
@@ -657,7 +657,7 @@ public:
                         winding += s_itr->value.a_is_main(rast.lpoints) ? 1 : -1;
 
                         Coord x_start = x;
-                        x = to_coord(x_intercept(s_itr->value.pa,s_itr->value.pb,y),0,static_cast<Coord>(width));
+                        x = to_coord(x_intercept(s_itr->value.pa,s_itr->value.pb,y),0,static_cast<Coord>(width-1));
    
                         if(prev_winding) {
                             sc = {static_cast<unsigned int>(x),static_cast<unsigned int>(x_start),static_cast<unsigned int>(y),prev_winding};

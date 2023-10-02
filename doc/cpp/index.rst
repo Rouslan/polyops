@@ -230,4 +230,5 @@ Reference
 .. toctree::
     base
     clip
+    offset
     large_ints

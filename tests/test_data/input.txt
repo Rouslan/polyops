@@ -4,30 +4,29 @@ union: 0
 difference: 1
 intersection: 2
 xor: 3
-normalize: 4
+normalize: 3
 ------
 subject: [ 20  21 207  34 199 151  16 135]
 clip: [ 48 114  51  40 157 128 164  67]
 union: 5
 difference: 6
 intersection: 7
-xor: 8
+xor: 6
 normalize: 9
 ------
-
 subject: [ 20  20 100  10 100 100  20 100]
 clip: [ 67  62  75 166 183  94]
 union: 10
 difference: 11
 intersection: 12
-xor: 13
+xor: 11
 normalize: 14
 ------
 subject: [ 72  10 173 177  10 126 156  60  35 197  49  46]
 union: 15
-difference: 16
+difference: 15
 intersection: 17
-xor: 18
+xor: 15
 normalize: 19
 ------
 subject: [ 19  24 123  22 115 136  11 129]
@@ -35,8 +34,8 @@ clip: [ 34  74  66  45 100  74  64 116]
 union: 20
 difference: 21
 intersection: 22
-xor: 23
-normalize: 24
+xor: 21
+normalize: 21
 ------
 subject: [ 27 114  17  59  65  15 138  23 157  83 133 129  70 141]
 subject: [123 210 118  98 245 120 213 192]
@@ -48,4 +47,16 @@ difference: 26
 intersection: 27
 xor: 28
 normalize: 29
+------
+subject: [ 41  74 106  88 174  33 176 148  72 221  41 154]
+subject: [ 53  94  56 148  79 199 161 140 160  65 108 102]
+clip: [248 222 114 230  96 118 237 100]
+clip: [116 133 126 214 226 205 219 120]
+union: 30
+difference: 31
+intersection: 32
+xor: 33
+normalize: 33
+xor+5: 38
+xor-5: 43
 ------

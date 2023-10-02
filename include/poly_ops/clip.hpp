@@ -794,7 +794,6 @@ public:
             }
             return line_state_t::discard;
         case bool_op::normalize:
-            if(w < 0) w = -1 - w;
             return w % 2 == 0 ? line_state_t::keep : line_state_t::keep_rev;
         }
 

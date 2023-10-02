@@ -162,67 +162,86 @@ void add_offset_point(
 
 } // namespace detail
 
-template<typename Coord,typename Index=std::size_t,point_range<Coord> R>
-void add_offset_loop(
+template<typename Coord,typename Index=std::size_t,typename Input>
+void add_offset_loops(
     clipper<Coord,Index> &n,
-    R &&input,
+    Input &&input,
     bool_set set,
     real_coord_t<Coord> magnitude,
     std::type_identity_t<Coord> arc_step_size)
 {
-    auto sink = n.add_loop(set);
-    Index orig_i = sink.last_orig_i();
-    auto itr = std::ranges::begin(input);
-    auto end = std::ranges::end(input);
-    if(itr == end) return;
+    static_assert(point_range_or_range_range<Input,Coord>);
+    static_assert(coordinate<Coord>);
+    static_assert(std::integral<Index>);
 
-    point_t<Coord> prev2(*itr++);
-    point_t<Coord> first = prev2;
+    if constexpr(point_range_range<Input,Coord>) {
+        for(auto &&loop: input) add_offset_loops(n,std::forward<decltype(loop)>(loop),set,magnitude,arc_step_size);
+    } else {
+        auto sink = n.add_loop(set);
+        Index orig_i = sink.last_orig_i();
+        auto itr = std::ranges::begin(input);
+        auto end = std::ranges::end(input);
+        if(itr == end) return;
 
-    if(itr == end) {
-        /* A size of one can be handled as a special case. The result is a
-        circle around the single point. For now, we just ignore such "loops". */
-        sink.last_orig_i() = orig_i + 1;
-        return;
+        point_t<Coord> prev2(*itr++);
+        point_t<Coord> first = prev2;
+
+        if(itr == end) {
+            /* A size of one can be handled as a special case. The result is a
+            circle around the single point, but for now, we just ignore such
+            "loops". */
+            sink.last_orig_i() = orig_i + 1;
+            return;
+        }
+
+        point_t<Coord> prev1(*itr++);
+        point_t<Coord> second = prev1;
+
+        if(itr == end) {
+            detail::add_offset_point(sink,magnitude,arc_step_size,orig_i,prev2,prev1,prev2);
+            detail::add_offset_point(sink,magnitude,arc_step_size,orig_i,prev1,prev2,prev1);
+            return;
+        }
+
+        for(auto &&p : std::ranges::subrange(itr,end)) {
+            detail::add_offset_point(sink,magnitude,arc_step_size,orig_i,prev2,prev1,p);
+            prev2 = prev1;
+            prev1 = p;
+        }
+        detail::add_offset_point(sink,magnitude,arc_step_size,orig_i,prev2,prev1,first);
+        detail::add_offset_point(sink,magnitude,arc_step_size,orig_i,prev1,first,second);
     }
-
-    point_t<Coord> prev1(*itr++);
-
-    if(itr == end) {
-        detail::add_offset_point(sink,magnitude,arc_step_size,orig_i,prev2,prev1,prev2);
-        detail::add_offset_point(sink,magnitude,arc_step_size,orig_i,prev1,prev2,prev1);
-        return;
-    }
-
-    for(auto &&p : std::ranges::subrange(itr,end)) {
-        detail::add_offset_point(sink,magnitude,arc_step_size,orig_i,prev2,prev1,p);
-        prev2 = prev1;
-        prev1 = p;
-    }
-    detail::add_offset_point(sink,magnitude,arc_step_size,orig_i,prev2,prev1,first);
 }
 
-template<typename Coord,typename Index=std::size_t,point_range<Coord> R>
-void add_offset_loop_subject(
+template<typename Coord,typename Index=std::size_t,typename Input>
+void add_offset_loops_subject(
     clipper<Coord,Index> &n,
-    R &&input,
+    Input &&input,
     real_coord_t<Coord> magnitude,
     std::type_identity_t<Coord> arc_step_size)
 {
-    add_offset_loop(n,std::forward<R>(input),bool_set::subject,magnitude,arc_step_size);
+    static_assert(point_range_or_range_range<Input,Coord>);
+    static_assert(coordinate<Coord>);
+    static_assert(std::integral<Index>);
+
+    add_offset_loops(n,std::forward<Input>(input),bool_set::subject,magnitude,arc_step_size);
 }
 
-template<typename Coord,typename Index=std::size_t,point_range<Coord> R>
-void add_offset_loop_clip(
+template<typename Coord,typename Index=std::size_t,typename Input>
+void add_offset_loops_clip(
     clipper<Coord,Index> &n,
-    R &&input,
+    Input &&input,
     real_coord_t<Coord> magnitude,
     std::type_identity_t<Coord> arc_step_size)
 {
-    add_offset_loop(n,std::forward<R>(input),bool_set::clip,magnitude,arc_step_size);
+    static_assert(point_range_or_range_range<Input,Coord>);
+    static_assert(coordinate<Coord>);
+    static_assert(std::integral<Index>);
+
+    add_offset_loops(n,std::forward<Input>(input),bool_set::clip,magnitude,arc_step_size);
 }
 
-template<bool TreeOut,coordinate Coord,std::integral Index=std::size_t,point_range_range<Coord> Input>
+template<bool TreeOut,typename Coord,typename Index=std::size_t,typename Input>
 std::conditional_t<TreeOut,
     temp_polygon_tree_range<Coord,Index>,
     temp_polygon_range<Coord,Index>>
@@ -233,8 +252,12 @@ offset(
     point_tracker<Index> *pt=nullptr,
     std::pmr::memory_resource *contig_mem=nullptr)
 {
+    static_assert(point_range_or_range_range<Input,Coord>);
+    static_assert(coordinate<Coord>);
+    static_assert(std::integral<Index>);
+
     clipper<Coord,Index> n{pt,contig_mem};
-    for(auto &&loop : input) add_offset_loop(n,std::forward<decltype(loop)>(loop),bool_set::subject,magnitude,arc_step_size);
+    add_offset_loops(n,std::forward<Input>(input),bool_set::subject,magnitude,arc_step_size);
     return std::move(n).template execute<TreeOut>(bool_op::union_);
 }
 
