@@ -595,7 +595,7 @@ template<typename Coord> Coord hsign_of(const point_t<Coord> &delta) {
 template<typename Index,typename Coord> point_t<Coord> line_delta(
     const loop_point<Index,Coord> *points,Index p)
 {
-    return points[points[p].next].data - points[p].data;
+    return end_point(points,p) - points[p].data;
 }
 
 /* Calculate the "line balance".
@@ -1009,7 +1009,7 @@ template<typename Index,typename Coord> struct sweep_cmp {
         if(s1.pa.x() == s2.pa.x()) {
             Coord r = s1.pa.y() - s2.pa.y();
             if(r) return r > 0;
-            long_coord_t<Coord> r2 = triangle_winding(s1.pa,s1.pb,s2.pb);
+            long_coord_t<Coord> r2 = triangle_winding(s1.pb,s1.pa,s2.pb);
             if(r2) return r2 > 0;
             /* the lines are coincident and have the same start point but they
             might be pointing away from each other */
@@ -1017,16 +1017,16 @@ template<typename Index,typename Coord> struct sweep_cmp {
             if(r) return r > 0;
         } else if(s1.pa.x() < s2.pa.x()) {
             if(s1.pa.x() != s1.pb.x()) {
-                long_coord_t<Coord> r = triangle_winding(s1.pa,s1.pb,s2.pa);
+                long_coord_t<Coord> r = triangle_winding(s1.pb,s1.pa,s2.pa);
                 if(r) return r > 0;
-                r = triangle_winding(s1.pa,s1.pb,s2.pb);
+                r = triangle_winding(s1.pb,s1.pa,s2.pb);
                 if(r) return r > 0;
             }
         } else {
             if(s2.pa.x() != s2.pb.x()) {
-                long_coord_t<Coord> r = triangle_winding(s2.pb,s2.pa,s1.pa);
+                long_coord_t<Coord> r = triangle_winding(s2.pa,s2.pb,s1.pa);
                 if(r) return r > 0;
-                r = triangle_winding(s2.pb,s2.pa,s1.pb);
+                r = triangle_winding(s2.pa,s2.pb,s1.pb);
                 if(r) return r > 0;
             }
         }
@@ -1266,6 +1266,10 @@ intr_array_t<Index> unique_sorted_loop_points(
     return ordered_loops;
 }
 
+template<typename Points,typename Index> auto end_point(const Points &points,Index i) noexcept {
+    return points[points[i].next].data;
+}
+
 template<typename Index,typename Coord>
 void replace_line_indices_with_loop_indices(
     const std::pmr::vector<loop_point<Index,Coord>> &lpoints,
@@ -1276,7 +1280,7 @@ void replace_line_indices_with_loop_indices(
     std::pmr::vector<int> inside(loops.size(),0,contig_mem);
     for(auto& item : ordered_loops) {
         for(Index i : item.hits) {
-            point_t<Coord> d = lpoints[i].data - lpoints[lpoints[i].next].data;
+            point_t<Coord> d = lpoints[i].data - end_point(lpoints,i);
             inside[lpoints[i].aux.loop_index]
                 += ((d.x() ? d.x() : d.y()) > 0) ? 1 : -1;
         }
@@ -2120,16 +2124,31 @@ void clipper<Coord,Index>::do_op(bool_op op) {
     /* match all the points in broken_starts and broken_ends to make new loops
     with the remaining lines */
     for(auto intr : broken_ends) {
-        auto p = lpoints[lpoints[intr].next].data;
+        auto p = end_point(lpoints,intr);
         auto os = broken_starts.find(p);
 
         POLY_OPS_ASSERT(os != broken_starts.end() && !os->second.items.empty() && os->second.cur < os->second.items.size());
 
-        Index b_start = os->second.items[os->second.cur++];
+        Index b_start = static_cast<Index>(os->second.cur);
+
+        /* to minimize the number of holes, always connect to the line that
+        results in the greatest clock-wise turn */
+        if(os->second.cur+1 < os->second.items.size()) {
+            bool right = !large_ints::negative(triangle_winding(lpoints[intr].data,p,end_point(lpoints,os->second.items[b_start])));
+            for(Index i=b_start+1; i<static_cast<Index>(os->second.items.size()); ++i) {
+                bool i_left = large_ints::negative(triangle_winding(lpoints[intr].data,p,end_point(lpoints,os->second.items[i])));
+                bool left_of_bs = large_ints::negative(triangle_winding(p,end_point(lpoints,os->second.items[b_start]),end_point(lpoints,os->second.items[i])));
+                if(right ? (i_left || left_of_bs) : (i_left && left_of_bs)) continue;
+                b_start = i;
+            }
+        }
 
         //if(pt) pt->point_merge(lpoints[intr].next,b_start);
 
-        lpoints[intr].next = b_start;
+        if(b_start != static_cast<Index>(os->second.cur)) {
+            std::swap(os->second.items[b_start],os->second.items[os->second.cur]);
+        }
+        lpoints[intr].next = os->second.items[os->second.cur++];
     }
 
     // there shouldn't be any left

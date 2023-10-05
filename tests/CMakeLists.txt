@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(THREADS_PREFER_PTHREAD_FLAG True)
 
 
-find_package(Boost 1.69.0 COMPONENTS unit_test_framework)
+find_package(Boost 1.69.0)
 find_package(Threads)
 
 
@@ -25,11 +25,6 @@ if(Boost_FOUND)
 
     add_executable(random_shapes random_shapes.cpp)
     target_link_libraries(random_shapes websocket_server)
-
-
-    add_executable(unit_tests unit_tests.cpp)
-    target_link_libraries(unit_tests Boost::unit_test_framework)
-    target_compile_definitions(unit_tests PRIVATE BOOST_TEST_DYN_LINK)
 endif()
 
 find_package(PkgConfig)

@@ -52,6 +52,10 @@ Getting the results as a hierarchy instead of a flat list:
     for loop in output: print_polygon(loop)
 
 
+Installing:
+
+`pip install --user polyops @ git+https://github.com/Rouslan/polyops`
+
 Reference:
 
 .. toctree::

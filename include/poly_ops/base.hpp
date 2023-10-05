@@ -283,8 +283,8 @@ template<typename Coord> constexpr long_coord_t<Coord> triangle_winding(
     const point_t<Coord> &p2,
     const point_t<Coord> &p3)
 {
-    return coord_ops<Coord>::mul(p3[0]-p1[0],p2[1]-p1[1]) -
-        coord_ops<Coord>::mul(p2[0]-p1[0],p3[1]-p1[1]);
+    return coord_ops<Coord>::mul(p2[0]-p1[0],p3[1]-p1[1]) -
+        coord_ops<Coord>::mul(p3[0]-p1[0],p2[1]-p1[1]);
 }
 
 template<typename Coord,typename T>

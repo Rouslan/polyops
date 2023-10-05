@@ -151,9 +151,9 @@ Types
 
 .. cpp:enum:: value_t
     
-    .. cpp::enumerator:: truncate_v
+    .. cpp:enumerator:: truncate_v
     
-    .. cpp::enumerator:: euclid_v
+    .. cpp:enumerator:: euclid_v
 
 .. cpp:type:: template<value_t Mod> type = std::integral_constant<value_t,Mod>
 
