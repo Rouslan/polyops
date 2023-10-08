@@ -42,6 +42,7 @@ if(Python3_FOUND)
         install(FILES
             ${CMAKE_CURRENT_SOURCE_DIR}/__init__.pyi
             ${CMAKE_CURRENT_SOURCE_DIR}/__init__.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/py.typed
             DESTINATION polyops)
 
         install(TARGETS polydraw LIBRARY DESTINATION polyops/tests)

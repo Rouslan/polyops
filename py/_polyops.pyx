@@ -2,7 +2,6 @@
 #distutils: language = c++
 
 cimport cython
-from libc.stdlib cimport malloc, free
 import numpy as np
 cimport numpy as np
 cimport common
@@ -35,24 +34,17 @@ cdef extern from *:
         if(NPY_UNLIKELY(!r)) return nullptr;
 
         if(x.size()) {
-            npy_iterator itr(
+            npy_range itr(
                 reinterpret_cast<PyArrayObject*>(r),
-                NPY_ITER_WRITEONLY | NPY_ITER_UPDATEIFCOPY,
+                NPY_ITER_WRITEONLY | NPY_ITER_UPDATEIFCOPY | NPY_ITER_REFS_OK,
                 NPY_UNSAFE_CASTING);
             if(NPY_UNLIKELY(!itr)) {
                 Py_DECREF(r);
                 return nullptr;
             }
 
-            auto p_itr = x.begin();
-            do {
-                assert(p_itr != x.end());
-                auto &&p = *p_itr++;
-                itr.item() = p[0];
-                itr.next();
-                itr.item() = p[1];
-            } while(itr.next_check());
-            assert(p_itr == x.end());
+            cond_gil_unlocker unlocker{!itr.needs_api()};
+            std::ranges::copy(x,itr.begin());
         }
 
         return r;
@@ -129,18 +121,40 @@ cdef extern from *:
         if(PyArray_SIZE(ar) == 0) Py_RETURN_NONE;
 
         try {
-            auto sink = c.add_loop(static_cast<poly_ops::bool_set>(cat));
-
-            npy_iterator itr(ar,NPY_ITER_READONLY,casting);
+            npy_range itr(ar,NPY_ITER_READONLY | NPY_ITER_REFS_OK,casting);
             if(NPY_UNLIKELY(!itr)) return nullptr;
 
-            do {
-                poly_ops::point_t<coord_t> p;
-                p[0] = itr.item();
-                itr.next();
-                p[1] = itr.item();
-                sink(p);
-            } while(itr.next_check());
+            {
+                cond_gil_unlocker unlocker{!itr.needs_api()};
+                c.add_loops(itr,static_cast<poly_ops::bool_set>(cat));
+            }
+
+            Py_RETURN_NONE;
+        } catch(const std::bad_alloc&) {
+            return PyErr_NoMemory();
+        } catch(...) {
+            return unexpected_exc();
+        }
+    }
+
+    PyObject *_clipper_add_loop_offset(
+        clipper &c,
+        PyArrayObject *ar,
+        _bool_set cat,
+        double magnitude,
+        int step_size,
+        NPY_CASTING casting) noexcept
+    {
+        if(PyArray_SIZE(ar) == 0) Py_RETURN_NONE;
+
+        try {
+            npy_range itr(ar,NPY_ITER_READONLY | NPY_ITER_REFS_OK,casting);
+            if(NPY_UNLIKELY(!itr)) return nullptr;
+
+            {
+                cond_gil_unlocker unlocker{!itr.needs_api()};
+                poly_ops::add_offset_loops(c,itr,static_cast<poly_ops::bool_set>(cat),magnitude,step_size);
+            }
 
             Py_RETURN_NONE;
         } catch(const std::bad_alloc&) {
@@ -188,24 +202,17 @@ cdef extern from *:
     PyObject *_winding_dir(PyArrayObject *ar,NPY_CASTING casting) noexcept {
         if(PyArray_SIZE(ar) == 0) return pylong_from_(0l);
 
-        npy_iterator itr(ar,NPY_ITER_READONLY,casting);
+        npy_range itr(ar,NPY_ITER_READONLY | NPY_ITER_REFS_OK,casting);
         if(NPY_UNLIKELY(!itr)) return nullptr;
 
-        poly_ops::point_t<coord_t> p;
-        p[0] = itr.item();
-        itr.next();
-        p[1] = itr.item();
+        poly_ops::long_coord_t<coord_t> r;
 
-        poly_ops::winding_dir_sink<coord_t> sink{p};
-
-        while(itr.next_check()) {
-            p[0] = itr.item();
-            itr.next();
-            p[1] = itr.item();
-            sink(p);
+        {
+            cond_gil_unlocker unlocker{!itr.needs_api()};
+            r = poly_ops::winding_dir<coord_t>(itr);
         }
 
-        return pylong_from_(sink.close());
+        return pylong_from_(r);
     }
 
     PyObject *obj_to_dtype_opt(PyObject *obj) noexcept {
@@ -215,8 +222,6 @@ cdef extern from *:
         return reinterpret_cast<PyObject*>(r);
     }
     """
-    const int COORD_T_NPY
-
     cpdef enum BoolOp "_bool_op":
         union "BOOL_OP_UNION",
         intersection "BOOL_OP_INTERSECTION",
@@ -232,6 +237,7 @@ cdef extern from *:
         void reset()
 
     object _clipper_add_loop(clipper&,np.ndarray,BoolSet,np.NPY_CASTING)
+    object _clipper_add_loop_offset(clipper&,np.ndarray,BoolSet,double,int,np.NPY_CASTING)
     object _clipper_execute_(bint tree,clipper&,BoolOp,np.dtype)
     object _winding_dir(np.ndarray,np.NPY_CASTING)
 
@@ -259,6 +265,26 @@ cdef load_loops(clipper &c,loops,BoolSet bset,common_dtype,np.NPY_CASTING castin
         common_dtype = load_loop(c,loop,bset,common_dtype,casting)
     return common_dtype
 
+cdef load_loop_offset(clipper &c,loop,BoolSet bset,double magnitude,int step_size,common_dtype,np.NPY_CASTING casting):
+    cdef np.ndarray ar
+    cdef np.dtype r
+
+    if step_size < 1:
+        raise ValueError("'arc_step_size' must be greater than zero")
+
+    ar = common.to_array(loop)
+    if common_dtype is None:
+        r = ar.descr
+    else:
+        r = PyArray_PromoteTypes(ar.descr,<np.dtype>common_dtype)
+    _clipper_add_loop_offset(c,ar,bset,magnitude,step_size,casting)
+    return r
+
+cdef load_loops_offset(clipper &c,loops,BoolSet bset,double magnitude,int step_size,common_dtype,np.NPY_CASTING casting):
+    for loop in loops:
+        common_dtype = load_loop_offset(c,loop,bset,magnitude,step_size,common_dtype,casting)
+    return common_dtype
+
 cdef np.dtype decide_dtype(np.dtype calculated,explicit):
     return calculated if explicit is None else <np.dtype>explicit
 
@@ -266,7 +292,7 @@ cdef check_dtype(obj):
     obj = obj_to_dtype_opt(obj)
     if obj is not None:
         if not PyArray_CanCastTypeTo(
-                np.PyArray_DescrFromType(COORD_T_NPY),
+                np.PyArray_DescrFromType(common.COORD_T_NPY),
                 <np.dtype>obj,
                 np.NPY_UNSAFE_CASTING):
             raise TypeError('Cannot convert to the specified "dtype"')
@@ -284,6 +310,18 @@ cdef unary_op_(bint tree,loops,BoolOp op,casting_obj,dtype_obj):
 
     return _clipper_execute_(tree,c,op,decide_dtype(<np.dtype>calc_dtype,dtype_obj))
 
+cdef offset_op_(bint tree,loops,double magnitude,int step_size,casting_obj,dtype_obj):
+    cdef np.NPY_CASTING casting
+    cdef clipper c
+
+    common._casting_converter(casting_obj,&casting)
+    dtype_obj = check_dtype(dtype_obj)
+
+    calc_dtype = load_loops_offset(c,loops,BoolSet.subject,magnitude,step_size,None,casting)
+    if calc_dtype is None: return ()
+
+    return _clipper_execute_(tree,c,BoolOp.union,decide_dtype(<np.dtype>calc_dtype,dtype_obj))
+
 def union_tree(loops,*,casting='same_kind',dtype=None):
     return unary_op_(1,loops,BoolOp.union,casting,dtype)
 
@@ -295,6 +333,12 @@ def normalize_tree(loops,*,casting='same_kind',dtype=None):
 
 def normalize_flat(loops,*,casting='same_kind',dtype=None):
     return unary_op_(0,loops,BoolOp.normalize,casting,dtype)
+
+def offset_tree(loops,double magnitude,int arc_step_size,*,casting='same_kind',dtype=None):
+    return offset_op_(1,loops,magnitude,arc_step_size,casting,dtype)
+
+def offset_flat(loops,double magnitude,int arc_step_size,*,casting='same_kind',dtype=None):
+    return offset_op_(0,loops,magnitude,arc_step_size,casting,dtype)
 
 cdef boolean_op_(bint tree,subject,clip,BoolOp op,casting_obj,dtype_obj):
     cdef np.NPY_CASTING casting
@@ -331,6 +375,11 @@ cdef class Clipper:
         cdef np.NPY_CASTING casting
         common._casting_converter(casting_obj,&casting)
         self.calc_dtype = load_loop(self._clip[0],loop,bset,self.calc_dtype,casting)
+    
+    cdef _add_loop_offset(self,loop,BoolSet bset,double magnitude,int step_size,casting_obj):
+        cdef np.NPY_CASTING casting
+        common._casting_converter(casting_obj,&casting)
+        self.calc_dtype = load_loop_offset(self._clip[0],loop,bset,magnitude,step_size,self.calc_dtype,casting)
 
     def add_loop(self,loop,BoolSet bset,*,casting='same_kind'):
         self._add_loop(loop,bset,casting)
@@ -340,20 +389,43 @@ cdef class Clipper:
 
     def add_loop_clip(self,loop,*,casting='same_kind'):
         self._add_loop(loop,BoolSet.clip,casting)
+    
+    def add_loop_offset(self,loop,BoolSet bset,double magnitude,int arc_step_size,*,casting='same_kind'):
+        self._add_loop_offset(loop,bset,magnitude,arc_step_size,casting)
+
+    def add_loop_offset_subject(self,loop,double magnitude,int arc_step_size,*,casting='same_kind'):
+        self._add_loop_offset(loop,BoolSet.subject,magnitude,arc_step_size,casting)
+
+    def add_loop_offset_clip(self,loop,double magnitude,int arc_step_size,*,casting='same_kind'):
+        self._add_loop_offset(loop,BoolSet.clip,magnitude,arc_step_size,casting)
 
     cdef _add_loops(self,loops,BoolSet bset,casting_obj):
         cdef np.NPY_CASTING casting
         common._casting_converter(casting_obj,&casting)
         self.calc_dtype = load_loops(self._clip[0],loops,bset,self.calc_dtype,casting)
 
+    cdef _add_loops_offset(self,loops,BoolSet bset,double magnitude,int step_size,casting_obj):
+        cdef np.NPY_CASTING casting
+        common._casting_converter(casting_obj,&casting)
+        self.calc_dtype = load_loops_offset(self._clip[0],loops,bset,magnitude,step_size,self.calc_dtype,casting)
+
     def add_loops(self,loops,BoolSet bset,*,casting='same_kind'):
-        load_loops(self._clip[0],loops,bset,self.calc_dtype,casting)
+        self._add_loops(loops,bset,casting)
 
     def add_loops_subject(self,loops,*,casting='same_kind'):
         self._add_loops(loops,BoolSet.subject,casting)
 
     def add_loops_clip(self,loops,*,casting='same_kind'):
         self._add_loops(loops,BoolSet.clip,casting)
+    
+    def add_loops_offset(self,loops,BoolSet bset,double magnitude,int arc_step_size,*,casting='same_kind'):
+        self._add_loops_offset(loops,bset,magnitude,arc_step_size,casting)
+
+    def add_loops_offset_subject(self,loops,double magnitude,int arc_step_size,*,casting='same_kind'):
+        self._add_loops_offset(loops,BoolSet.subject,magnitude,arc_step_size,casting)
+
+    def add_loops_offset_clip(self,loops,double magnitude,int arc_step_size,*,casting='same_kind'):
+        self._add_loops_offset(loops,BoolSet.clip,magnitude,arc_step_size,casting)
 
     cdef execute_(self,bint tree,BoolOp op,dtype_obj):
         dtype_obj = check_dtype(dtype_obj)

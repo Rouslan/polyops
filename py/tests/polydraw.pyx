@@ -53,18 +53,13 @@ cdef extern from *:
         if(PyArray_SIZE(ar) == 0) Py_RETURN_NONE;
 
         try {
-            auto sink = r.add_loop();
-
-            npy_iterator itr(ar,NPY_ITER_READONLY,casting);
+            npy_range itr(ar,NPY_ITER_READONLY | NPY_ITER_REFS_OK,casting);
             if(NPY_UNLIKELY(!itr)) return nullptr;
 
-            do {
-                poly_ops::point_t<coord_t> p;
-                p[0] = itr.item();
-                itr.next();
-                p[1] = itr.item();
-                sink(p);
-            } while(itr.next_check());
+            {
+                cond_gil_unlocker unlocker{!itr.needs_api()};
+                r.add_loops(itr);
+            }
 
             Py_RETURN_NONE;
         } catch(const std::bad_alloc&) {

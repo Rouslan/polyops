@@ -183,7 +183,8 @@ void add_offset_loops(
         auto end = std::ranges::end(input);
         if(itr == end) return;
 
-        point_t<Coord> prev2(*itr++);
+        point_t<Coord> prev2(*itr);
+        ++itr;
         point_t<Coord> first = prev2;
 
         if(itr == end) {
@@ -194,7 +195,8 @@ void add_offset_loops(
             return;
         }
 
-        point_t<Coord> prev1(*itr++);
+        point_t<Coord> prev1(*itr);
+        ++itr;
         point_t<Coord> second = prev1;
 
         if(itr == end) {
@@ -203,7 +205,7 @@ void add_offset_loops(
             return;
         }
 
-        for(auto &&p : std::ranges::subrange(itr,end)) {
+        for(point_t<Coord> p : std::ranges::subrange(itr,end)) {
             detail::add_offset_point(sink,magnitude,arc_step_size,orig_i,prev2,prev1,p);
             prev2 = prev1;
             prev1 = p;

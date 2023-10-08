@@ -10,6 +10,7 @@ from . import test_data
 
 DIFF_FAIL_SQUARE_SIZE = 5
 DUMP_FAILURE_DIFF = False
+OFFSET_ARC_STEP_SIZE = 3
 
 # Technically, comments can appear anywhere, including inside 'tokens', not just
 # around tokens, but we only need to open our own files, so this is good enough.
@@ -149,16 +150,22 @@ class BitmapTestCase(unittest.TestCase):
         for item in self.data:
             for offset,file_id in item.op_files[op].items():
                 if (offset == 0) == nonzero_offset: continue
-                if offset:
-                    raise Exception('not implemented yet')
 
-                with self.subTest(file=file_id):
+                params = dict(op=op,file=file_id)
+                if offset:
+                    params['offset'] = offset
+
+                with self.subTest(**params):
                     imgfilename = file_id + '.pbm'
                     target_img = read_pbm(imgfilename,(test_data_files/imgfilename).read_bytes())
                     test_img = np.zeros_like(target_img)
 
-                    self.clip.add_loops_subject(item.set_data[polyops.BoolSet.subject])
-                    self.clip.add_loops_clip(item.set_data[polyops.BoolSet.clip])
+                    if offset:
+                        self.clip.add_loops_offset_subject(item.set_data[polyops.BoolSet.subject],offset,OFFSET_ARC_STEP_SIZE)
+                        self.clip.add_loops_offset_clip(item.set_data[polyops.BoolSet.clip],offset,OFFSET_ARC_STEP_SIZE)
+                    else:
+                        self.clip.add_loops_subject(item.set_data[polyops.BoolSet.subject])
+                        self.clip.add_loops_clip(item.set_data[polyops.BoolSet.clip])
 
                     self.rast.reset()
                     self.rast.add_loops(self.clip.execute_flat(op))
@@ -187,6 +194,10 @@ class BitmapTestCase(unittest.TestCase):
 
     def test_normalize(self):
         self._run_op(polyops.BoolOp.normalize)
+    
+    def test_offset(self):
+        for op in polyops.BoolOp:
+            self._run_op(op,True)
 
 if __name__ == '__main__':
     unittest.main()

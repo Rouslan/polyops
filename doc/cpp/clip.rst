@@ -99,9 +99,6 @@ Types
         all singly nested lines are counter-clockwise polygons, all
         doubly-nested polygons are clockwise polygons, and so forth.
 
-        .. image:: /_static/normalize.svg
-            :alt: normalize operation example
-
 
 .. cpp:enum-class:: bool_set
 

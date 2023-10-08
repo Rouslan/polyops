@@ -46,8 +46,6 @@ target_compile_definitions(test_large_ints_noext PRIVATE POLY_OPS_NO_COMPILER_EX
 add_test(NAME TestLargeInts COMMAND test_large_ints_ext)
 add_test(NAME TestLargeIntsNoExt COMMAND test_large_ints_noext)
 
-add_executable(simple simple.cpp)
-
 add_executable(btest btest.cpp bitmap.cpp)
 set(test_input_file ${CMAKE_CURRENT_SOURCE_DIR}/test_data/input.txt)
 add_test(NAME UnionBitmapTest COMMAND btest ${test_input_file} union)
