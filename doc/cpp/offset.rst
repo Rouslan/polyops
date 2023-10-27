@@ -1,41 +1,48 @@
 poly_ops/offset.hpp
 =====================
 
-.. cpp:namespace:: poly_ops
+
+Types
+----------------
+
+.. doxygenstruct:: poly_ops::point_and_origin
+    :members:
+    :undoc-members:
+
+-----------------------------
+
+.. doxygenclass:: poly_ops::origin_point_tracker
 
 
 Functions
 ----------------
 
-.. cpp:function:: template<typename Coord,typename Index=std::size_t,typename Input>\
-    void add_offset_loops(\
-        clipper<Coord,Index> &n,\
-        Input &&input,\
-        bool_set set,\
-        real_coord_t<Coord> magnitude,\
-        std::type_identity_t<Coord> arc_step_size)
+.. doxygenfunction:: poly_ops::add_offset_loops(clipper<Coord,Index>&,Input&&,bool_set,real_coord_t<Coord>,std::type_identity_t<Coord>,i_point_tracker<Index>*)
 
-.. cpp:function:: template<typename Coord,typename Index=std::size_t,typename Input>\
-    void add_offset_loops_subject(\
-        clipper<Coord,Index> &n,\
-        Input &&input,\
-        real_coord_t<Coord> magnitude,\
-        std::type_identity_t<Coord> arc_step_size)
+-----------------------------
 
-.. cpp:function:: template<typename Coord,typename Index=std::size_t,typename Input>\
-    void add_offset_loops_clip(\
-        clipper<Coord,Index> &n,\
-        Input &&input,\
-        real_coord_t<Coord> magnitude,\
-        std::type_identity_t<Coord> arc_step_size)
+.. doxygenfunction:: poly_ops::add_offset_loops(tclipper<Coord,Index,Tracker>&,Input&&,bool_set,real_coord_t<Coord>,std::type_identity_t<Coord>)
 
-.. cpp:function:: template<bool TreeOut,typename Coord,typename Index=std::size_t,typename Input>\
-    std::conditional_t<TreeOut,\
-        temp_polygon_tree_range<Coord,Index>,\
-        temp_polygon_range<Coord,Index>>\
-    offset(\
-        Input &&input,\
-        real_coord_t<Coord> magnitude,\
-        Coord arc_step_size,\
-        point_tracker<Index> *pt=nullptr,\
-        std::pmr::memory_resource *contig_mem=nullptr)
+-----------------------------
+
+.. doxygenfunction:: poly_ops::add_offset_loops_subject(clipper<Coord,Index>&,Input&&,real_coord_t<Coord>,std::type_identity_t<Coord>)
+
+-----------------------------
+
+.. doxygenfunction:: poly_ops::add_offset_loops_subject(tclipper<Coord,Index,Tracker>&,Input&&,real_coord_t<Coord>,std::type_identity_t<Coord>)
+
+-----------------------------
+
+.. doxygenfunction:: poly_ops::add_offset_loops_clip(clipper<Coord,Index>&,Input&&,real_coord_t<Coord>,std::type_identity_t<Coord>)
+
+-----------------------------
+
+.. doxygenfunction:: poly_ops::add_offset_loops_clip(tclipper<Coord,Index,Tracker>&,Input&&,real_coord_t<Coord>,std::type_identity_t<Coord>)
+
+-----------------------------
+
+.. doxygenfunction:: poly_ops::offset(Input&&,real_coord_t<Coord>,Coord,Tracker&&,std::pmr::memory_resource*)
+
+-----------------------------
+
+.. doxygenfunction:: poly_ops::offset(Input&&,real_coord_t<Coord>,Coord,std::pmr::memory_resource*)

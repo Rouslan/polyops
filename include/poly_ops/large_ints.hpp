@@ -249,6 +249,9 @@ namespace detail {
     template<typename T> concept unsigned_type = unsigned_integral<T> || !_is_signed<std::decay_t<T>>::value;
 } // namespace detail
 
+/**
+ * Matches an instance of `compound_xint` or a built-in integer.
+ */
 template<typename T> concept comp_or_single_i = requires {
     { detail::_int_count<false,T>::value };
 };
@@ -355,6 +358,10 @@ namespace detail {
     }
 }
 
+/**
+ * Matches an instance of `compound_xint` or a built-in integer than can cast to
+ * `compound_xint<N,Signed>` without loss of information.
+ */
 template<typename T,unsigned int N,bool Signed> concept safe_comp_or_single_i
     = detail::int_count<Signed,T> <= N && (Signed || detail::unsigned_type<T>);
 
@@ -408,6 +415,9 @@ public:
         }
     }
 
+#ifdef DOXYGEN_PARSING
+    template<detail::builtin_number T> explicit operator T() const noexcept;
+#else
     template<detail::integral T> explicit operator T() const noexcept {
         return detail::cast<T>(*this);
     }
@@ -426,6 +436,7 @@ public:
             return static_cast<T>(static_cast<full_xint<Signed>>(_data[0]));
         }
     }
+#endif
 
     constexpr bool negative() const noexcept {
         return Signed && static_cast<full_int>(hi()) < 0;
@@ -1065,6 +1076,9 @@ namespace detail {
     }
 }
 
+/**
+ * Multiply `a` and `b` and return a type big enough to not overflow
+ */
 template<typename T,typename U> auto mul(const T &a,const U &b) noexcept {
     using namespace detail;
 
@@ -1113,8 +1127,15 @@ namespace modulo_t {
 template<comp_or_single_i T,comp_or_single_i U,modulo_t::value_t Mod=modulo_t::truncate_v>
 auto divmod(const T &a,const U &b,modulo_t::type<Mod> = {}) noexcept;
 
-/* "unmul" is short for un-multiply. It is like a normal division function
-except it assumes a/b fits inside compound_xint<Nr,Signed>. */
+/**
+ * "unmul" is short for un-multiply. It is like a normal division function
+ * except it assumes a/b fits inside `compound_xint<Nr,Signed>`.
+ *
+ * Most of the time, this is just normal division followed by a cast, but on x86
+ * platforms, when Nr is 1, T is equivalent to `compound_xint` with a size of 2
+ * and U is equivalent to `compound_xint` with a size of 1, this operation only
+ * needs a single CPU instruction.
+ */
 template<unsigned int Nr,typename T,typename U,modulo_t::value_t Mod=modulo_t::truncate_v,bool Signed = detail::signed_type<T> || detail::signed_type<U>>
 auto unmul(const T &a,const U &b,modulo_t::type<Mod> = {}) noexcept {
     using namespace detail;
@@ -1429,9 +1450,11 @@ namespace detail {
     }
 } // namespace detail
 
-/* Parse a hexadecimal value and return a compound_int instance with the
-smallest size that can fit all the digits, including Leading zeros (after the
-initial "0x"). */
+/**
+ * Parse a hexadecimal value and return a `compound_int` instance with the
+ * smallest size that can fit all the digits, including Leading zeros (after the
+ * initial "0x")
+ */
 template<char... C> constexpr auto operator""_compi() {
     static_assert(sizeof...(C) >= 3,"compound_int literal cannot have fewer than 3 characters");
     constexpr auto r = detail::skip_0x<C...>();

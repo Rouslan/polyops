@@ -58,6 +58,8 @@ add_test(NAME OffsetBitmapTest COMMAND btest ${test_input_file} offset)
 add_executable(whitebox white_box.cpp)
 add_test(NAME WhiteBox COMMAND whitebox -t2000 -n50000 -p50)
 
+#add_executable(misc_tests misc_tests.cpp)
+
 add_executable(gen_discontinuous gen_discontinuous.cpp bitmap.cpp)
 
 add_custom_target(test_bin)

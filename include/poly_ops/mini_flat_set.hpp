@@ -64,7 +64,7 @@ class mini_flat_set {
         auto isize = std::distance(first,last);
 
         T tmp = u.item;
-        u.data = alloc_data(alloc,isize+1);
+        u.data = alloc_data(alloc,static_cast<std::size_t>(isize)+1);
         u.data->items[0] = tmp;
         return std::copy(first,last,u.data->items+1);
     }
@@ -92,7 +92,7 @@ class mini_flat_set {
 
         auto isize = std::distance(first,last);
 
-        std::size_t total = _size + isize;
+        std::size_t total = _size + static_cast<std::size_t>(isize);
         if(total > u.data->capacity) {
             data_t *tmp = u.data;
             u.data = alloc_data(alloc,total);
@@ -217,14 +217,14 @@ public:
 
             T *new_end = create_items(alloc,first,last);
             std::sort(u.data->items,new_end);
-            _size = std::unique(u.data->items,new_end) - u.data->items;
+            _size = static_cast<std::size_t>(std::unique(u.data->items,new_end) - u.data->items);
         } else {
             if(first == last) return;
 
             T *new_end = append_items(alloc,first,last);
             std::sort(u.data->items+_size,new_end);
             std::inplace_merge(u.data->items,u.data->items+_size,new_end);
-            _size = std::unique(u.data->items,new_end) - u.data->items;
+            _size = static_cast<std::size_t>(std::unique(u.data->items,new_end) - u.data->items);
         }
     }
 
@@ -334,7 +334,7 @@ template<typename Alloc1,typename T2> struct two_tier_allocator_adapter : public
 };
 
 template<typename T,typename Allocator> struct mini_set_proxy_maker {
-    static mini_flat_set_alloc_proxy<T,Allocator> make(const mini_flat_set<T,Allocator> &value,Allocator alloc) noexcept {
+    static mini_flat_set_alloc_proxy<T,Allocator> make(mini_flat_set<T,Allocator> &value,Allocator alloc) noexcept {
         return {value,alloc};
     }
 };
@@ -365,7 +365,6 @@ template<typename T,typename Allocator,typename ProxyMaker> struct proxy_vector 
     using alloc_adapter = two_tier_allocator_adapter<
         typename std::allocator_traits<Allocator>::template rebind_alloc<T>,T>;
     using base_type = std::vector<T,alloc_adapter>;
-    using proxy = decltype(ProxyMaker::make);
 
     base_type data;
 
@@ -375,12 +374,12 @@ template<typename T,typename Allocator,typename ProxyMaker> struct proxy_vector 
     /* since only the non-const functions need an allocator, we can return the
     real type in const accessors */
     const T &operator[](typename base_type::size_type i) const { return data[i]; }
-    proxy operator[](typename base_type::size_type i) { return ProxyMaker::make(data[i],data.get_allocator().alloc2); }
+    auto operator[](typename base_type::size_type i) { return ProxyMaker::make(data[i],data.get_allocator().alloc2); }
 
     const T &font() const { return data.front(); }
-    proxy front() { return ProxyMaker::make(data.front(),data.get_allocator().alloc2); }
+    auto front() { return ProxyMaker::make(data.front(),data.get_allocator().alloc2); }
     const T &back() const { return data.back(); }
-    proxy back() { return ProxyMaker::make(data.back(),data.get_allocator().alloc2); }
+    auto back() { return ProxyMaker::make(data.back(),data.get_allocator().alloc2); }
 
     auto begin() const { return data.begin(); }
     auto end() const { return data.end(); }
@@ -389,6 +388,7 @@ template<typename T,typename Allocator,typename ProxyMaker> struct proxy_vector 
     auto size() const { return data.size(); }
 
     void reserve(typename base_type::size_type new_cap) { data.reserve(new_cap); }
+    void resize(typename base_type::size_type newsize) { data.resize(newsize); }
     void clear() { data.clear(); }
     template<typename... Arg> void emplace_back(Arg&& ...arg) {
         data.emplace_back(std::forward<Arg>(arg)...);
@@ -397,11 +397,11 @@ template<typename T,typename Allocator,typename ProxyMaker> struct proxy_vector 
 };
 
 template<typename T,typename Alloc> using mini_set_proxy_vector =
-    proxy_vector<T,Alloc,mini_set_proxy_maker<T,Alloc>>;
+    proxy_vector<mini_flat_set<T,Alloc>,Alloc,mini_set_proxy_maker<T,Alloc>>;
 
 template<typename Index,typename Alloc> using indexed_mini_set_proxy_vector =
     proxy_vector<
-        indexed_mini_flat_set<Index,mini_flat_set<Index,Alloc>>,
+        indexed_mini_flat_set<Index,Alloc>,
         Alloc,
         indexed_mini_set_proxy_maker<Index,Alloc>>;
 

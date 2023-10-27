@@ -51,107 +51,183 @@ inside functions marked as "noexcept". In such cases, "assert" is used. */
 #endif
 
 namespace poly_ops {
-/** Point tracking common interface.
 
-Note that the destructor is not virtual, and is instead protected.
-*/
-template<typename Index=std::size_t> class point_tracker {
+/**
+ * Point tracking common interface.
+ *
+ * The "clipper" class stores all points in a single array. To associate extra data
+ * with each point, a second array may be created with the extra data. This
+ * interface is a set of callbacks that allows keeping an external array
+ * synchronized with clipper's internal array.
+ *
+ * Note that the destructor is not virtual, and is instead protected.
+ */
+template<typename Index=std::size_t> class i_point_tracker {
 public:
-    /** Called when intersecting lines are broken and consequently new points
-    are added.
+    /**
+     * Called when a line is split, adding a new point.
+     *
+     * `a` and `b` are the endpoints of the line that was split. Like
+     * `point_added`, the index of this new point is one greater than the index
+     * of the last point added.
+     *
+     * \param a The index of the intersection point of the first line.
+     * \param b The index of the intersection point of the second line.
+     */
+    virtual void new_point_between(Index a,Index b) = 0;
 
-    One of "a" or "b" will refer to a new point but not necessarily both (an
-    endpoint touching the middle of another line only requires a new point for
-    the other line). The index of a new point will always be one greater than
-    the index of the last point added, thus, to know if a point is new, keep
-    track of the number of points added.
-
-    @param a The index of the intersection point of the first line.
-    @param b The index of the intersection point of the second line.
-    */
-    virtual void new_intersection(Index a,Index b) = 0;
-
-    /** Called when points are "merged".
-
-    When parts of the shape are going to be truncated, this is called on the
-    first point to be discarded as "from" and the point that follows it as "to".
-    If the next point is also to be discarded, this is called again with that
-    point along with the point after that. This is repeated until the point
-    reached is not going to be discarded, or the following point was already
-    discarded because we've circled around the entire loop.
-
-    Discarded points are never referenced again.
-
-    @param from The index of the point to be discarded.
-    @param to The index of the point that follows "from".
-    */
+    /**
+     * Called when points are "merged".
+     *
+     * When parts of the shape are going to be truncated, this is called on the
+     * first point to be discarded as `from` and the point that follows it as
+     * `to`. If the next point is also to be discarded, this is called again
+     * with that point along with the point after that. This is repeated until
+     * the point reached is not going to be discarded, or the following point
+     * was already discarded because we've circled around the entire loop.
+     *
+     * Discarded points are never referenced again.
+     *
+     * \param from The index of the point to be discarded.
+     * \param to The index of the point that follows `from`.
+     */
     virtual void point_merge(Index from,Index to) = 0;
 
-    /** Called when a point's coordinates are changed.
-
-    The coordinates of "p" are changed to the original coordinates of "to" (the
-    coordinates that "to" had before any call to "point_move"). The point at
-    "to" itself is not affected in any way.
-
-    This method will be called, at most, as many times are there are
-    intersections plus the number of loops. In the case of the "union"
-    operation, it is never called.
-    */
+    /**
+     * Called when a point's coordinates are changed.
+     *
+     * The coordinates of `p` are changed to the original coordinates of `to`
+     * (the coordinates that `to` had before any call to `point_move`). The
+     * point at "to" itself is not affected in any way.
+     *
+     * This method will be called, at most, as many times are there are
+     * intersections plus the number of loops. In the case of the `union`
+     * operation, it is never called.
+     */
     virtual void point_move(Index p,Index to) = 0;
 
-    /** Called for every point initially added.
-
-    Every added point has an implicit index (this index is unrelated to
-    `original_i`). This method is first called when point zero is added. Every
-    subsequent call corresponds to the index that is one greater than the
-    previous call.
-
-    `original_i` is the index of the input point that the added point
-    corresponds to. The value is what the array index of the original point
-    would be if all the input points were added, in order, to a single array.
-    This will not necessarily be called for every point of the input; duplicate
-    consecutive points are ignored.
-
-    @param original_i The index of the input point that this added point
-        corresponds to.
-    */
+    /**
+     * Called for every point initially added.
+     *
+     * Every added point has an implicit index (this index is unrelated to
+     * `original_i`). This method is first called when point zero is added.
+     * Every subsequent call corresponds to the index that is one greater than
+     * the previous call.
+     *
+     * `original_i` is the index of the input point that the added point
+     * corresponds to. The value is what the array index of the original point
+     * would be if all the input points were added, in order, to a single array.
+     * This will not necessarily be called for every point of the input;
+     * duplicate consecutive points are ignored.
+     *
+     * \param original_i The index of the input point that this added point
+     *     corresponds to.
+     */
     virtual void point_added(Index original_i) = 0;
 
-    /** Called if the last "n" points added were removed.
-
-    This only happens when a polygon is added with fewer than three points. The
-    clipper class doesn't work with such polygons and after counting the number
-    of points added, will remove the points of the those polygons.
-
-    @param n The number of points to remove. This will be equal to 1 or 2.
-    */
+    /**
+     * Called if the last "n" points added were removed.
+     *
+     * This only happens when a polygon is added with fewer than three points.
+     * The clipper class doesn't work with such polygons and after counting the
+     * number of points added, will remove the points of the those polygons.
+     *
+     * \param n The number of points to remove. This will be equal to 1 or 2.
+     */
     virtual void points_removed(Index n) = 0;
 
 protected:
-    ~point_tracker() = default;
+    ~i_point_tracker() = default;
 };
 
+template<typename Coord,typename Index=std::size_t> struct null_tracker;
+
+/**
+ * `null_tracker` is stateless. The clipper data types use
+ * `[[no_unique_address]]` after pointers to trackers, so an empty struct is
+ * used instead of a real pointer for `null_tracker`.
+ */
+template<typename Coord,typename Index> struct null_tracker_ptr {
+    null_tracker<Coord,Index> operator*() const noexcept;
+};
+
+template<typename Coord,typename Index> struct null_tracker {
+    i_point_tracker<Index> *callbacks() { return nullptr; }
+    point_t<Coord> get_value(Index,const point_t<Coord> &p) const { return p; }
+
+    null_tracker_ptr<Coord,Index> operator&() const noexcept { return {}; }
+};
+
+template<typename Coord,typename Index>
+null_tracker<Coord,Index> null_tracker_ptr<Coord,Index>::operator*() const noexcept { return {}; }
+
+template<typename T,typename Coord,typename Index> concept point_tracker =
+    requires(T val,const T cval,Index i,point_t<Coord> p) {
+        { val.callbacks() } -> std::convertible_to<i_point_tracker<Index>*>;
+        cval.get_value(i,p);
+    };
+
+/**
+ * Given two sets of polygons, `subject` and `clip`, specifies which operation
+ * to perform.
+ */
 enum class bool_op {
-    /* Boolean operation `subject` OR `clip` */
+    /**
+     * Boolean operation `subject` OR `clip`.
+     * 
+     * \verbatim embed:rst:leading-asterisk
+     * .. image:: /_static/union.svg
+     *     :alt: union operation example
+     * \endverbatim
+     */
     union_ = 0,
 
-    /* Boolean operation `subject` AND `clip` */
+    /**
+     * Boolean operation `subject` AND `clip`.
+     *
+     * \verbatim embed:rst:leading-asterisk
+     * .. image:: /_static/intersection.svg
+     *     :alt: intersection operation example
+     * \endverbatim
+     */
     intersection,
 
-    /* Boolean operation `subject` XOR `clip` */
+    /**
+     * Boolean operation `subject` XOR `clip`
+     *
+     * \verbatim embed:rst:leading-asterisk
+     * .. image:: /_static/xor.svg
+     *     :alt: xor operation example
+     * \endverbatim
+     */
     xor_,
 
-    /* Boolean operation `subject` AND NOT `clip` */
+    /**
+     * Boolean operation `subject` AND NOT `clip`
+     *
+     * \verbatim embed:rst:leading-asterisk
+     * .. image:: /_static/difference.svg
+     *     :alt: difference operation example
+     * \endverbatim
+     */
     difference,
 
-    /* Keep all lines but make it so all outer lines are clockwise polygons, all
-    singly nested lines are counter-clockwise polygons, all doubly-nested
-    lines are clockwise polygons, and so forth. */
+    /**
+     * Keep all lines but make it so all outer lines are clockwise polygons, all
+     * singly nested lines are counter-clockwise polygons, all doubly-nested
+     * lines are clockwise polygons, and so forth.
+     */
     normalize};
 
+/**
+ * Specifies one of two sets.
+ *
+ * The significance of these sets depends on the operation performed.
+ */
 enum class bool_set {subject=0,clip=1};
 
 namespace detail {
+
 enum class line_state_t {undef,check,discard,keep,keep_rev};
 
 struct line_desc {
@@ -600,10 +676,10 @@ template<typename Index,typename Coord> point_t<Coord> line_delta(
 
 /* Calculate the "line balance".
 
-The line balance is based on the idea of a winding number, except it
-applies the lines instead of points inside. A positive number means nested
-geometry, negative means inverted geometry, and zero means normal geometry
-(clockwise oriented polygons and counter-clockwise holes). */
+The line balance is based on the idea of a winding number, except it applies to
+the lines instead of the points inside. A positive number means nested geometry,
+negative means inverted geometry, and zero means normal geometry (clockwise
+oriented polygons and counter-clockwise holes). */
 template<typename Index,typename Coord> class dual_line_balance {
     /* Polygons are oriented clockwise, and holes counter-clockwise, thus for
     polygons, for every point on every line going right (towards positive
@@ -1157,7 +1233,7 @@ void follow_balance(
     Index intr,
     std::pmr::vector<Index> &broken_ends,
     broken_starts_t<Index,Coord> &broken_starts,
-    point_tracker<Index> *pt)
+    i_point_tracker<Index> *pt)
 {
     POLY_OPS_ASSERT(points[intr].has_line_bal());
     Index next = points[intr].next;
@@ -1338,134 +1414,33 @@ void loop_hierarchy(
 
 } // namespace detail
 
-template<typename Coord,typename Index=std::size_t,bool EmitIndex=false> class temp_polygon_proxy;
+template<typename Coord,typename Index=std::size_t,typename Tracker=null_tracker<Coord,Index>> class temp_polygon_proxy;
 
 namespace detail {
 
-template<typename Index,typename Coord>
-auto make_temp_polygon_tree_range(
-    const loop_point<Index,Coord> *lpoints,
-    std::type_identity_t<std::span<temp_polygon<Index>* const>> top)
-{
-    return top | std::views::transform(
-        [lpoints](const temp_polygon<Index> *poly) {
-            return temp_polygon_proxy<Coord,Index>(lpoints,*poly);
-        });
-}
+template<typename Tracker,typename LPoints,bool IsPtr> struct tracked_points {
+    Tracker _tracker;
+    [[no_unique_address]] LPoints lpoints;
 
-} // namespace detail
-
-template<typename Coord,typename Index=std::size_t> struct indexed_point_t {
-    Index i;
-    point_t<Coord> p;
-};
-
-template<typename Coord,typename Index=std::size_t,bool EmitIndex=false> class proto_loop_iterator {
-    friend class temp_polygon_proxy<Coord,Index,EmitIndex>;
-
-    const detail::loop_point<Index,Coord> *lpoints;
-    Index i;
-
-    /* Loops have the same "i" value for "begin()" and "end()" thus a different
-    value is used to distinguish the end from other iterators. */
-    Index dist_from_end;
-
-    proto_loop_iterator(const detail::loop_point<Index,Coord> *lpoints,Index i,Index dist_from_end) noexcept
-        : lpoints(lpoints), i(i), dist_from_end(dist_from_end) {}
-
-public:
-    using value_type = std::conditional_t<EmitIndex,indexed_point_t<Coord,Index>,point_t<Coord>>;
-    
-    proto_loop_iterator &operator++() noexcept {
-        i = lpoints[i].next;
-        --dist_from_end;
-        return *this;
-    }
-
-    proto_loop_iterator operator++(int) noexcept {
-        return {lpoints,std::exchange(i,lpoints[i].next),dist_from_end--};
-    }
-
-    std::conditional_t<EmitIndex,indexed_point_t<Coord,Index>,const point_t<Coord>&>
-    operator*() const noexcept(std::is_nothrow_copy_constructible_v<Coord> || !EmitIndex) {
-        if constexpr(EmitIndex) return {i,lpoints[i].data};
-        else return lpoints[i].data;
-    }
-
-    friend bool operator==(const proto_loop_iterator &a,const proto_loop_iterator &b) noexcept {
-        assert(a.lpoints == b.lpoints);
-        return a.dist_from_end == b.dist_from_end;
-    }
-
-    friend std::ptrdiff_t operator-(const proto_loop_iterator &a,const proto_loop_iterator &b) noexcept {
-        assert(a.lpoints == b.lpoints);
-        return static_cast<std::ptrdiff_t>(b.dist_from_end) - static_cast<std::ptrdiff_t>(a.dist_from_end);
-    }
-
-    Index index() const noexcept { return i; }
-
-    proto_loop_iterator() noexcept = default;
-    proto_loop_iterator(const proto_loop_iterator&) noexcept = default;
-
-    proto_loop_iterator<Coord,Index,true> indexed() const noexcept {
-        return {lpoints,i,dist_from_end};
+    auto tracker() noexcept {
+        if constexpr(IsPtr) { return _tracker; }
+        else { return &_tracker; }
     }
 };
-
-template<typename Coord,typename Index,bool EmitIndex>
-proto_loop_iterator<Coord,Index,true> indexed(const proto_loop_iterator<Coord,Index,EmitIndex> &x) {
-    return x.indexed();
+template<typename Tracker,typename LPoints> auto make_tracked_points(Tracker &&tracker,LPoints &&lpoints) {
+    if constexpr(std::is_lvalue_reference_v<Tracker>) {
+        return tracked_points<decltype(&tracker),LPoints,true>{&tracker,std::forward<LPoints>(lpoints)};
+    } else {
+        return tracked_points<Tracker,LPoints,false>{std::move(tracker),std::forward<LPoints>(lpoints)};
+    }
 }
-
-template<typename Coord,typename Index,bool EmitIndex>
-class temp_polygon_proxy : public std::ranges::view_interface<temp_polygon_proxy<Coord,Index,EmitIndex>> {
-    const detail::loop_point<Index,Coord> *lpoints;
-    const detail::temp_polygon<Index> &data;
-public:
-    temp_polygon_proxy(
-        const detail::loop_point<Index,Coord> *lpoints,
-        const detail::temp_polygon<Index> &data)
-        : lpoints(lpoints), data(data) {}
-
-    proto_loop_iterator<Coord,Index,EmitIndex> begin() const noexcept {
-        return {lpoints,data.loop_loc.start,data.loop_loc.size};
-    }
-
-    proto_loop_iterator<Coord,Index,EmitIndex> end() const noexcept {
-        return {lpoints,data.loop_loc.start,0};
-    }
-
-    Index size() const noexcept { return data.loop_loc.size; }
-
-    auto inner_loops() const noexcept {
-        return detail::make_temp_polygon_tree_range(lpoints,data.children);
-    }
-
-    temp_polygon_proxy<Coord,Index,true> indexed() const noexcept {
-        return {lpoints,data};
-    }
-};
-
-} // namespace poly_ops
-
-template<typename Coord,typename Index,bool EmitIndex>
-inline constexpr bool std::ranges::enable_borrowed_range<poly_ops::temp_polygon_proxy<Coord,Index,EmitIndex>> = true;
-
-namespace poly_ops {
-
-template<typename Coord,typename Index,bool EmitIndex>
-temp_polygon_proxy<Coord,Index,true> indexed(const temp_polygon_proxy<Coord,Index,EmitIndex> &x) {
-    return x.indexed();
-}
-
-namespace detail {
 
 template<typename I,typename F>
 struct iterator_facade {
     using value_type = std::invoke_result_t<F,std::iter_value_t<I>>;
 
     I base;
-    const F *fun;
+    F *fun;
 
     iterator_facade &operator++() noexcept {
         ++base;
@@ -1522,51 +1497,186 @@ template<typename R,typename F> struct range_facade {
     R base;
     F fun;
 
+    template<typename T,typename U> range_facade(T &&base,U &&fun)
+        : base{std::forward<T>(base)}, fun{std::forward<U>(fun)} {}
+    
+    range_facade(range_facade&&) = default;
+
     std::size_t size() const noexcept {
         return std::ranges::size(base);
     }
     bool empty() const noexcept { return std::ranges::empty(base); }
 
-    auto begin() const noexcept { return iterator_facade<std::ranges::iterator_t<const R>,F>{std::ranges::begin(base),&fun}; }
-    auto end() const noexcept { return iterator_facade<std::ranges::iterator_t<const R>,F>{std::ranges::end(base),&fun}; }
+    auto begin() noexcept { return iterator_facade<std::ranges::iterator_t<R>,F>{std::ranges::begin(base),&fun}; }
+    auto end() noexcept { return iterator_facade<std::ranges::iterator_t<R>,F>{std::ranges::end(base),&fun}; }
 };
 
 template<typename R,typename F> range_facade(R &&base,F &&fun)
-    -> range_facade<std::remove_reference_t<R>,std::remove_reference_t<F>>;
+    -> range_facade<R,F>;
 
-template<typename Index,typename Coord> auto make_temp_polygon_tree_range(
+
+template<typename Index,typename Coord,typename Tracker>
+auto make_temp_polygon_tree_range(
+    const loop_point<Index,Coord> *lpoints,
+    std::type_identity_t<std::span<temp_polygon<Index>* const>> top,
+    Tracker &&tracker)
+{
+    return range_facade(
+        top,
+        [tl=make_tracked_points(tracker,lpoints)]
+        (const temp_polygon<Index> *poly) mutable {
+            return temp_polygon_proxy<Coord,Index,Tracker>(tl.lpoints,*poly,tl.tracker());
+        });
+}
+
+} // namespace detail
+
+/**
+ * An opaque type that models `std::forward_iterator`. The iterator yields
+ * instances of `point_t<Coord>`.
+ */
+template<typename Coord,typename Index=std::size_t,typename Tracker=null_tracker<Coord,Index>> class proto_loop_iterator {
+public:
+    using tracker_ptr = decltype(&std::declval<Tracker&>());
+    using value_type = decltype(std::declval<Tracker>().get_value(std::declval<Index>(),std::declval<point_t<Coord>>()));
+
+private:
+    friend class temp_polygon_proxy<Coord,Index,Tracker>;
+
+    tracker_ptr tracker;
+    [[no_unique_address]] const detail::loop_point<Index,Coord> *lpoints;
+    Index i;
+
+    /* Loops have the same "i" value for "begin()" and "end()" thus a different
+    value is used to distinguish the end from other iterators. */
+    Index dist_from_end;
+
+    
+
+    proto_loop_iterator(const detail::loop_point<Index,Coord> *lpoints,Index i,Index dist_from_end,tracker_ptr tracker) noexcept
+        : tracker{tracker}, lpoints{lpoints}, i{i}, dist_from_end{dist_from_end} {}
+
+public:
+    proto_loop_iterator &operator++() noexcept {
+        i = lpoints[i].next;
+        --dist_from_end;
+        return *this;
+    }
+
+    proto_loop_iterator operator++(int) noexcept {
+        return {lpoints,std::exchange(i,lpoints[i].next),dist_from_end--};
+    }
+
+    value_type operator*() const noexcept(std::is_nothrow_copy_constructible_v<Coord>) {
+        return (*tracker).get_value(i,lpoints[i].data);
+    }
+
+    friend bool operator==(const proto_loop_iterator &a,const proto_loop_iterator &b) noexcept {
+        assert(a.lpoints == b.lpoints);
+        return a.dist_from_end == b.dist_from_end;
+    }
+
+    friend std::ptrdiff_t operator-(const proto_loop_iterator &a,const proto_loop_iterator &b) noexcept {
+        assert(a.lpoints == b.lpoints);
+        return static_cast<std::ptrdiff_t>(b.dist_from_end) - static_cast<std::ptrdiff_t>(a.dist_from_end);
+    }
+
+    Index index() const noexcept { return i; }
+
+    proto_loop_iterator() noexcept = default;
+    proto_loop_iterator(const proto_loop_iterator&) noexcept = default;
+};
+
+
+/**
+ * A representation of a polygon with zero or more child polygons.
+ *
+ * This class is not meant to be directly instantiated by users of this
+ * library. This class models `std::ranges::forward_range` and
+ * `std::ranges::sized_range` and yields instances of `point_t<Coord>`.
+ */
+template<typename Coord,typename Index,typename Tracker>
+class temp_polygon_proxy : public std::ranges::view_interface<temp_polygon_proxy<Coord,Index,Tracker>> {
+public:
+    using tracker_ptr = decltype(&std::declval<Tracker&>());
+
+private:
+    const detail::loop_point<Index,Coord> *lpoints;
+    const detail::temp_polygon<Index> &data;
+    [[no_unique_address]] tracker_ptr tracker;
+public:
+    temp_polygon_proxy(
+        const detail::loop_point<Index,Coord> *lpoints,
+        const detail::temp_polygon<Index> &data,
+        tracker_ptr tracker)
+        : lpoints{lpoints}, data{data}, tracker{tracker} {}
+
+    /** Get the iterator to the first element. */
+    proto_loop_iterator<Coord,Index,Tracker> begin() const noexcept {
+        return {lpoints,data.loop_loc.start,data.loop_loc.size,tracker};
+    }
+
+    /** Get the end iterator */
+    proto_loop_iterator<Coord,Index,Tracker> end() const noexcept {
+        return {lpoints,data.loop_loc.start,0,tracker};
+    }
+
+    /** Return the number of elements in this range. */
+    Index size() const noexcept { return data.loop_loc.size; }
+
+    /** Return a range representing the children of this polygon. */
+    auto inner_loops() const noexcept {
+        return detail::make_temp_polygon_tree_range<Index,Coord,Tracker>(lpoints,data.children,tracker);
+    }
+};
+
+} // namespace poly_ops
+
+template<typename Coord,typename Index,typename Tracker>
+inline constexpr bool std::ranges::enable_borrowed_range<poly_ops::temp_polygon_proxy<Coord,Index,Tracker>> = true;
+
+namespace poly_ops {
+
+namespace detail {
+
+template<typename Index,typename Coord,typename Tracker> auto make_temp_polygon_tree_range(
     std::pmr::vector<loop_point<Index,Coord>> &&lpoints,
     std::pmr::vector<temp_polygon<Index>> &&loops,
-    std::pmr::vector<temp_polygon<Index>*> &&top)
+    std::pmr::vector<temp_polygon<Index>*> &&top,
+    Tracker &&tracker)
 {
     /* "loops" isn't used directly but is referenced by "top" */
     return range_facade(
         std::move(top),
-        [lpoints=std::move(lpoints),loops=std::move(loops)]
-        (const temp_polygon<Index> *poly) {
-            return temp_polygon_proxy<Coord,Index>(lpoints.data(),*poly);
+        [tl=make_tracked_points(std::forward<Tracker>(tracker),std::move(lpoints)),loops=std::move(loops)]
+        (const temp_polygon<Index> *poly) mutable {
+            return temp_polygon_proxy<Coord,Index,Tracker>(tl.lpoints.data(),*poly,tl.tracker());
         });
 }
 
-template<typename Index,typename Coord> auto make_temp_polygon_range(
+template<typename Index,typename Coord,typename Tracker> auto make_temp_polygon_range(
     std::pmr::vector<loop_point<Index,Coord>> &&lpoints,
-    std::pmr::vector<temp_polygon<Index>> &&loops)
+    std::pmr::vector<temp_polygon<Index>> &&loops,
+    Tracker &&tracker)
 {
     return range_facade(
         std::move(loops),
-        [lpoints=std::move(lpoints)]
-        (const temp_polygon<Index> &poly) {
-            return temp_polygon_proxy<Coord,Index>(lpoints.data(),poly);
+        [tl=make_tracked_points(std::forward<Tracker>(tracker),std::move(lpoints))]
+        (const temp_polygon<Index> &poly) mutable {
+            return temp_polygon_proxy<Coord,Index,Tracker>(tl.lpoints.data(),poly,tl.tracker());
         });
 }
 
-template<typename Index,typename Coord> auto make_temp_polygon_range(
+template<typename Index,typename Coord,typename Tracker> auto make_temp_polygon_range(
     const std::pmr::vector<loop_point<Index,Coord>> &lpoints,
-    const std::pmr::vector<temp_polygon<Index>> &loops)
+    const std::pmr::vector<temp_polygon<Index>> &loops,
+    Tracker &&tracker)
 {
-    return loops | std::views::transform(
-        [lpoints=lpoints.data()](const temp_polygon<Index> &poly) {
-            return temp_polygon_proxy<Coord,Index>(lpoints,poly);
+    return range_facade(
+        loops,
+        [tl=make_tracked_points(std::forward<Tracker>(tracker),lpoints.data())]
+        (const temp_polygon<Index> &poly) mutable {
+            return temp_polygon_proxy<Coord,Index,Tracker>(tl.lpoints,poly,tl.tracker());
         });
 }
 
@@ -1577,35 +1687,63 @@ template<typename T> concept sized_forward_range =
 } // namespace detail
 
 
-template<typename Coord,typename Index=std::size_t>
+/** An opaque type that models `std::ranges::forward_range` and
+ * `std::ranges::sized_range`.
+ *
+ * Unlike `temp_polygon_tree_range`, an instance of this type does not own its
+ * data.
+ */
+template<typename Coord,typename Index=std::size_t,typename Tracker=null_tracker<Coord,Index>>
 using borrowed_temp_polygon_tree_range = decltype(
-    detail::make_temp_polygon_tree_range<Index,Coord>(
+    detail::make_temp_polygon_tree_range<Index,Coord,Tracker>(
         std::declval<detail::loop_point<Index,Coord>*>(),
-        std::declval<std::span<detail::temp_polygon<Index>*>>()));
+        std::declval<std::span<detail::temp_polygon<Index>*>>(),
+        std::declval<Tracker>()));
 
-template<typename Coord,typename Index=std::size_t>
+/**
+ * An opaque type that models `std::ranges::forward_range` and
+ * `std::ranges::sized_range`.
+ *
+ * Unlike `temp_polygon_range`, an instance of this type does not own its data.
+ */
+template<typename Coord,typename Index=std::size_t,typename Tracker=null_tracker<Coord,Index>>
 using borrowed_temp_polygon_range = decltype(
-    detail::make_temp_polygon_range<Index,Coord>(
+    detail::make_temp_polygon_range<Index,Coord,Tracker>(
         std::declval<const std::pmr::vector<detail::loop_point<Index,Coord>>&>(),
-        std::declval<const std::pmr::vector<detail::temp_polygon<Index>>&>()));
+        std::declval<const std::pmr::vector<detail::temp_polygon<Index>>&>(),
+        std::declval<Tracker>()));
 
-template<typename Coord,typename Index=std::size_t>
+/**
+ * An opaque type that models `std::ranges::forward_range` and
+ * `std::ranges::sized_range`.
+ */
+template<typename Coord,typename Index=std::size_t,typename Tracker=null_tracker<Coord,Index>>
 using temp_polygon_tree_range = decltype(
-    detail::make_temp_polygon_tree_range<Index,Coord>({},{},{}));
+    detail::make_temp_polygon_tree_range<Index,Coord>({},{},{},std::declval<Tracker>()));
 
-template<typename Coord,typename Index=std::size_t>
+/**
+ * An opaque type that models `std::ranges::forward_range` and
+ * `std::ranges::sized_range`.
+ */
+template<typename Coord,typename Index=std::size_t,typename Tracker=null_tracker<Coord,Index>>
 using temp_polygon_range = decltype(
-    detail::make_temp_polygon_range<Index,Coord>({},{}));
+    detail::make_temp_polygon_range<Index,Coord>({},{},std::declval<Tracker>()));
 
 
+/**
+ * A class for performing boolean clipping operations.
+ *
+ * An instance of `clipper` will reuse its allocated memory for subsequent
+ * operations, making it more efficient than calling `boolean_op` for performing
+ * multiple operations.
+ */
 template<coordinate Coord,std::integral Index=std::size_t> class clipper {
     static_assert(
         std::ranges::random_access_range<temp_polygon_tree_range<Coord,Index>>
         && std::ranges::random_access_range<temp_polygon_range<Coord,Index>>
         && std::ranges::random_access_range<borrowed_temp_polygon_tree_range<Coord,Index>>
         && std::ranges::random_access_range<borrowed_temp_polygon_range<Coord,Index>>
-        && detail::sized_forward_range<temp_polygon_proxy<Coord,Index,true>>
-        && detail::sized_forward_range<temp_polygon_proxy<Coord,Index,false>>);
+        && detail::sized_forward_range<temp_polygon_proxy<Coord,Index,null_tracker<Coord,Index>>>);
 
     std::pmr::memory_resource *contig_mem;
     std::pmr::unsynchronized_pool_resource discrete_mem;
@@ -1627,40 +1765,41 @@ template<coordinate Coord,std::integral Index=std::size_t> class clipper {
     std::pmr::vector<detail::temp_polygon<Index>> loops_out;
     std::pmr::vector<detail::temp_polygon<Index>*> top;
 
-    void self_intersection();
+    void self_intersection(i_point_tracker<Index> *pt);
     void calc_line_bal(bool_op op);
     Index split_segment(
         detail::sweep_t<Index,Coord> &sweep,
         Index s,
         const point_t<Coord> &c,
-        detail::at_edge_t at_edge);
+        detail::at_edge_t at_edge,
+        i_point_tracker<Index> *pt);
     bool check_intersection(
         detail::sweep_t<Index,Coord> &sweep,
         Index s1,
-        Index s2);
+        Index s2,
+        i_point_tracker<Index> *pt);
     void add_fb_events(Index sa,Index sb);
-    void do_op(bool_op op);
+    void do_op(bool_op op,i_point_tracker<Index> *pt);
 
-    template<point_range<Coord> R> void _add_loop(R &&loop,bool_set cat) {
-        auto sink = add_loop(cat);
+    template<point_range<Coord> R> void _add_loop(R &&loop,bool_set cat,i_point_tracker<Index> *pt) {
+        auto sink = add_loop(cat,pt);
         for(point_t<Coord> p : loop) sink(p,original_i + 1);
     }
 
 public:
-    point_tracker<Index> *pt;
-
     class point_sink {
         friend class clipper;
 
         clipper &n;
+        i_point_tracker<Index> *pt;
         point_t<Coord> prev;
         Index first_i;
         bool_set cat;
         bool started;
 
-        point_sink(clipper &n,bool_set cat) : n(n), cat(cat), started(false) {}
+        point_sink(clipper &n,bool_set cat,i_point_tracker<Index> *pt) : n{n}, pt{pt}, cat{cat}, started{false} {}
         point_sink(const point_sink&) = delete;
-        point_sink(point_sink &&b) : n(b.n), prev(b.prev), first_i(b.first_i), cat(b.cat), started(b.started) {
+        point_sink(point_sink &&b) : n{b.n}, pt{b.pt}, prev{b.prev}, first_i{b.first_i}, cat{b.cat}, started{b.started} {
             b.started = false;
         }
 
@@ -1671,9 +1810,7 @@ public:
         ~point_sink();
     };
 
-    explicit clipper(
-        point_tracker<Index> *pt=nullptr,
-        std::pmr::memory_resource *_contig_mem=nullptr) :
+    explicit clipper(std::pmr::memory_resource *_contig_mem=nullptr) :
         contig_mem(_contig_mem == nullptr ? std::pmr::get_default_resource() : _contig_mem),
         discrete_mem(contig_mem),
         lpoints(contig_mem),
@@ -1681,144 +1818,134 @@ public:
         events(contig_mem),
         broken_starts(&discrete_mem),
         broken_ends(contig_mem),
-        original_i(0),
+        original_i(static_cast<Index>(-1)),
         ran(false),
         loops_out(contig_mem),
-        top(contig_mem),
-        pt(pt)
+        top(contig_mem)
     {
         sweep_nodes.emplace_back();
     }
 
     clipper(clipper &&b) = default;
 
-    /* Important: you cannot pass the return value of "get_output()" from the
-    same instance of "clipper" to this function. If you want to feed the
-    results back into the same instance, make a copy of the data and pass the
-    copy here. */
-    template<typename R> void add_loops(R &&loops,bool_set cat) {
+    /**
+     * Add input polygons.
+     *
+     * The output returned by `execute` is invalidated.
+     *
+     * `R` must satisfy `point_range_or_range_range`.
+     */
+    template<typename R> void add_loops(R &&loops,bool_set cat,i_point_tracker<Index> *pt=nullptr) {
         static_assert(point_range_or_range_range<R,Coord>);
 
         if constexpr(point_range_range<R,Coord>) {
-            for(auto &&loop : loops) _add_loop(std::forward<decltype(loop)>(loop),cat);
+            for(auto &&loop : loops) _add_loop(std::forward<decltype(loop)>(loop),cat,pt);
         } else {
-            _add_loop(std::forward<R>(loops),cat);
+            _add_loop(std::forward<R>(loops),cat,pt);
         }
     }
 
-    /* Important: you cannot pass the return value of "get_output()" from the
-    same instance of "clipper" to this function. If you want to feed the
-    results back into the same instance, make a copy of the data and pass the
-    copy here. */
-    template<typename R> void add_loops_subject(R &&loops) {
+    /**
+     * Add input subject polygons.
+     *
+     * The output returned by `execute` is invalidated.
+     *
+     * `R` must satisfy `point_range_or_range_range`.
+     */
+    template<typename R> void add_loops_subject(R &&loops,i_point_tracker<Index> *pt=nullptr) {
         static_assert(point_range_or_range_range<R,Coord>);
-        add_loops(std::forward<R>(loops),bool_set::subject);
+        add_loops(std::forward<R>(loops),bool_set::subject,pt);
     }
 
-    /* Important: you cannot pass the return value of "get_output()" from the
-    same instance of "clipper" to this function. If you want to feed the
-    results back into the same instance, make a copy of the data and pass the
-    copy here. */
-    template<typename R> void add_loops_clip(R &&loops) {
+    /**
+     * Add input clip polygons.
+     *
+     * The output returned by `execute` is invalidated.
+     *
+     * `R` must satisfy `point_range_or_range_range`.
+     */
+    template<typename R> void add_loops_clip(R &&loops,i_point_tracker<Index> *pt=nullptr) {
         static_assert(point_range_or_range_range<R,Coord>);
-        add_loops(std::forward<R>(loops),bool_set::clip);
+        add_loops(std::forward<R>(loops),bool_set::clip,pt);
     }
 
-    /* Return a "point sink".
-
-    This is an alternative to adding loops with ranges. The return value is a
-    functor that allows adding one point at a time. The destructor of the return
-    value must be called before any other method of this instance of
-    "clipper" is called.
-
-    Important: you cannot use the return value of "get_output()" from the same
-    instance of "clipper" if this function is called. If you want to feed the
-    results back into the same instance, make a copy of the data. */
-    point_sink add_loop(bool_set cat) {
+    /**
+     * Return a "point sink".
+     *
+     * This is an alternative to adding loops with ranges. The return value is a
+     * functor that allows adding one point at a time. The destructor of the
+     * return value must be called before any method of this instance of
+     * `clipper` is called.
+     *
+     * The output returned by `execute` is invalidated.
+     */
+    point_sink add_loop(bool_set cat,i_point_tracker<Index> *pt=nullptr) {
         if(ran) reset();
-        return {*this,cat};
+        return {*this,cat,pt};
     }
 
-    /* Discard all loops added so far.
-    
-    The output returned by "get_output()" is invalidated. */
+    /**
+     * Discard all polygons added so far.
+     *
+     * The output returned by `execute` is invalidated.
+     */
     void reset();
 
-    /* The output of this function has references to data in this instance of
-    "clipper". The returned range is invalidated when "reset()" is called,
-    polygons are added or if the instance is destroyed. To keep the data, make a
-    copy. The data is also not sequential. */
-    template<bool TreeOut>
+    /**
+     * Perform a boolean operation and return the result.
+     *
+     * After calling this function, all the input is consumed. To perform
+     * another operation, polygons must be added again.
+     *
+     * The output of this function has references to data in this instance of
+     * `clipper`. The returned range is invalidated if the instance is destroyed
+     * or the next time a method of this instance is called. This means the
+     * return value cannot be fed directly back into the same instance of
+     * `clipper`. To keep the data, make a copy. The data is also not stored
+     * sequentially in memory.
+     */
+    template<bool TreeOut,typename Tracker>
     std::conditional_t<TreeOut,
-        borrowed_temp_polygon_tree_range<Coord,Index>,
-        borrowed_temp_polygon_range<Coord,Index>>
-    execute(bool_op op) &;
+        borrowed_temp_polygon_tree_range<Coord,Index,Tracker>,
+        borrowed_temp_polygon_range<Coord,Index,Tracker>>
+    execute(bool_op op,Tracker &&tracker) &;
 
-    template<bool TreeOut>
+    /**
+     * Perform a boolean operation and return the result.
+     *
+     * After calling this function, all the input is consumed. To perform
+     * another operation, polygons must be added again.
+     *
+     * The output of this function has references to data in this instance of
+     * `clipper`. The returned range is invalidated if the instance is destroyed
+     * or the next time a method of this instance is called. This means the
+     * return value cannot be fed directly back into the same instance of
+     * `clipper`. To keep the data, make a copy. The data is also not stored
+     * sequentially in memory.
+     */
+    template<bool TreeOut> auto execute(bool_op op) & {
+        return execute<TreeOut,null_tracker<Coord,Index>>(op,{});
+    }
+
+    /**
+     * Perform a boolean operation and return the result.
+     */
+    template<bool TreeOut,typename Tracker>
     std::conditional_t<TreeOut,
-        temp_polygon_tree_range<Coord,Index>,
-        temp_polygon_range<Coord,Index>>
-    execute(bool_op op) &&;
+        temp_polygon_tree_range<Coord,Index,Tracker>,
+        temp_polygon_range<Coord,Index,Tracker>>
+    execute(bool_op op,Tracker &&tracker) &&;
+
+    /**
+     * Perform a boolean operation and return the result.
+     */
+    template<bool TreeOut> auto execute(bool_op op) && {
+        return execute<TreeOut,null_tracker<Coord,Index>>(op,{});
+    }
+
+    Index &last_orig_i() noexcept { return original_i; }
+    Index last_orig_i() const noexcept { return original_i; }
 };
-
-template<bool TreeOut,typename Coord,typename Index=std::size_t,typename Input>
-std::conditional_t<TreeOut,
-    temp_polygon_tree_range<Coord,Index>,
-    temp_polygon_range<Coord,Index>>
-union_op(
-    Input &&input,
-    point_tracker<Index> *pt=nullptr,
-    std::pmr::memory_resource *contig_mem=nullptr)
-{
-    static_assert(point_range_or_range_range<Input,Coord>);
-    static_assert(coordinate<Coord>);
-    static_assert(std::integral<Index>);
-
-    clipper<Coord,Index> n{pt,contig_mem};
-    n.add_loops(std::forward<Input>(input),bool_set::subject);
-    return std::move(n).template execute<TreeOut>(bool_op::union_);
-}
-
-template<bool TreeOut,typename Coord,typename Index=std::size_t,typename Input>
-std::conditional_t<TreeOut,
-    temp_polygon_tree_range<Coord,Index>,
-    temp_polygon_range<Coord,Index>>
-normalize_op(
-    Input &&input,
-    point_tracker<Index> *pt=nullptr,
-    std::pmr::memory_resource *contig_mem=nullptr)
-{
-    static_assert(point_range_or_range_range<Input,Coord>);
-    static_assert(coordinate<Coord>);
-    static_assert(std::integral<Index>);
-
-    clipper<Coord,Index> n{pt,contig_mem};
-    n.add_loops(std::forward<Input>(input),bool_set::subject);
-    return std::move(n).template execute<TreeOut>(bool_op::normalize);
-}
-
-template<bool TreeOut,typename Coord,typename Index=std::size_t,typename SInput,typename CInput>
-std::conditional_t<TreeOut,
-    temp_polygon_tree_range<Coord,Index>,
-    temp_polygon_range<Coord,Index>>
-boolean_op(
-    SInput &&subject,
-    CInput &&clip,
-    bool_op op,
-    point_tracker<Index> *pt=nullptr,
-    std::pmr::memory_resource *contig_mem=nullptr)
-{
-    static_assert(point_range_or_range_range<CInput,Coord>);
-    static_assert(point_range_or_range_range<SInput,Coord>);
-    static_assert(coordinate<Coord>);
-    static_assert(std::integral<Index>);
-
-    clipper<Coord,Index> n{pt,contig_mem};
-    n.add_loops(std::forward<SInput>(subject),bool_set::subject);
-    n.add_loops(std::forward<CInput>(clip),bool_set::clip);
-    return std::move(n).template execute<TreeOut>(op);
-}
-
 
 template<coordinate Coord,std::integral Index>
 void clipper<Coord,Index>::point_sink::operator()(const point_t<Coord> &p,Index orig_i) {
@@ -1828,6 +1955,7 @@ void clipper<Coord,Index>::point_sink::operator()(const point_t<Coord> &p,Index 
         prev = p;
         first_i = static_cast<Index>(n.lpoints.size());
         started = true;
+        n.original_i = orig_i;
     }
 
     /* Normally, points aren't added until this is called with the next point or
@@ -1835,7 +1963,7 @@ void clipper<Coord,Index>::point_sink::operator()(const point_t<Coord> &p,Index 
     adding it on the first call means the "prev != n.lpoints.back().data" checks
     above and in the destructor are always safe. */
     n.lpoints.emplace_back(prev,static_cast<Index>(n.lpoints.size()+1),cat);
-    if(n.pt) n.pt->point_added(n.original_i);
+    if(pt) pt->point_added(n.original_i);
 
 skip:
     prev = p;
@@ -1846,7 +1974,7 @@ clipper<Coord,Index>::point_sink::~point_sink() {
     if(started) [[likely]] {
         if(prev != n.lpoints.back().data && prev != n.lpoints[first_i].data) [[likely]] {
             n.lpoints.emplace_back(prev,Index(0),cat);
-            if(n.pt) n.pt->point_added(n.original_i);
+            if(pt) pt->point_added(n.original_i);
         }
 
         /* This code doesn't work with polygons with fewer than three points. A
@@ -1856,7 +1984,7 @@ clipper<Coord,Index>::point_sink::~point_sink() {
         std::size_t new_points = n.lpoints.size() - static_cast<std::size_t>(first_i);
         if(new_points < 3) [[unlikely]] {
             while(new_points-- > 0) {
-                if(n.pt) n.pt->points_removed(static_cast<Index>(new_points));
+                if(pt) pt->points_removed(static_cast<Index>(new_points));
                 n.lpoints.pop_back();
             }
         } else {
@@ -1877,7 +2005,8 @@ Index clipper<Coord,Index>::split_segment(
     detail::sweep_t<Index,Coord> &sweep,
     Index s,
     const point_t<Coord> &c,
-    detail::at_edge_t at_edge)
+    detail::at_edge_t at_edge,
+    i_point_tracker<Index> *pt)
 {
     using namespace detail;
 
@@ -1906,6 +2035,8 @@ Index clipper<Coord,Index>::split_segment(
     POLY_OPS_ASSERT(lpoints[sa].bset() == lpoints[sb].bset());
     POLY_OPS_ASSERT_SLOW(check_integrity(lpoints,sweep));
 
+    if(pt) pt->new_point_between(sa,sb);
+
     /* even if the original line was not vertical, one of the new lines might
     be vertical after rounding */
     if(lpoints[sa].data[0] <= lpoints[mid].data[0]) {
@@ -1926,7 +2057,8 @@ template<coordinate Coord,std::integral Index>
 bool clipper<Coord,Index>::check_intersection(
     detail::sweep_t<Index,Coord> &sweep,
     Index s1,
-    Index s2)
+    Index s2,
+    i_point_tracker<Index> *pt)
 {
     using namespace detail;
 
@@ -1938,10 +2070,8 @@ bool clipper<Coord,Index>::check_intersection(
         Index intr1,intr2;
 
         if(at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no) [[likely]] {
-            intr1 = split_segment(sweep,s1,intr,at_edge[0]);
-            intr2 = split_segment(sweep,s2,intr,at_edge[1]);
-
-            if(pt) pt->new_intersection(intr1,intr2);
+            intr1 = split_segment(sweep,s1,intr,at_edge[0],pt);
+            intr2 = split_segment(sweep,s2,intr,at_edge[1],pt);
 
             lpoints[intr1].state() = line_state_t::check;
             lpoints[intr2].state() = line_state_t::check;
@@ -1971,7 +2101,7 @@ bool clipper<Coord,Index>::check_intersection(
 /* This is a modified version of the Bentley–Ottmann algorithm. Lines are broken
 at intersections. */
 template<coordinate Coord,std::integral Index>
-void clipper<Coord,Index>::self_intersection() {
+void clipper<Coord,Index>::self_intersection(i_point_tracker<Index> *pt) {
     using namespace detail;
 
     events.reserve(lpoints.size()*2 + 10);
@@ -2019,9 +2149,9 @@ void clipper<Coord,Index>::self_intersection() {
 
                 POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F
 
-                if(itr != sweep.begin() && check_intersection(sweep,e.sweep_node,std::prev(itr).index())) continue;
+                if(itr != sweep.begin() && check_intersection(sweep,e.sweep_node,std::prev(itr).index(),pt)) continue;
                 ++itr;
-                if(itr != sweep.end()) check_intersection(sweep,e.sweep_node,itr.index());
+                if(itr != sweep.end()) check_intersection(sweep,e.sweep_node,itr.index(),pt);
             } else {
                 sweep.erase(e.sweep_node);
                 POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_FR
@@ -2037,7 +2167,7 @@ void clipper<Coord,Index>::self_intersection() {
                     POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_B
 
                     if(itr != sweep.end() && itr != sweep.begin()) {
-                        check_intersection(sweep,std::prev(itr).index(),itr.index());
+                        check_intersection(sweep,std::prev(itr).index(),itr.index(),pt);
                     }
 
                     POLY_OPS_ASSERT_SLOW(!intersects_any(sweep_nodes[e.sweep_node],sweep,lpoints));
@@ -2098,7 +2228,7 @@ void clipper<Coord,Index>::calc_line_bal(bool_op op) {
 }
 
 template<coordinate Coord,std::integral Index>
-void clipper<Coord,Index>::do_op(bool_op op) {
+void clipper<Coord,Index>::do_op(bool_op op,i_point_tracker<Index> *pt) {
     POLY_OPS_ASSERT(!ran);
 
     ran = true;
@@ -2109,7 +2239,7 @@ void clipper<Coord,Index>::do_op(bool_op op) {
     loops_out.clear();
     top.clear();
 
-    self_intersection();
+    self_intersection(pt);
     calc_line_bal(op);
 
     for(auto &intr : samples) {
@@ -2182,43 +2312,45 @@ void clipper<Coord,Index>::do_op(bool_op op) {
 }
 
 template<coordinate Coord,std::integral Index>
-template<bool TreeOut>
+template<bool TreeOut,typename Tracker>
 std::conditional_t<TreeOut,
-    borrowed_temp_polygon_tree_range<Coord,Index>,
-    borrowed_temp_polygon_range<Coord,Index>>
-clipper<Coord,Index>::execute(bool_op op) & {
+    borrowed_temp_polygon_tree_range<Coord,Index,Tracker>,
+    borrowed_temp_polygon_range<Coord,Index,Tracker>>
+clipper<Coord,Index>::execute(bool_op op,Tracker &&tracker) & {
     if(ran) reset();
 
-    do_op(op);
+    do_op(op,tracker.callbacks());
 
     if constexpr(TreeOut) {
         loop_hierarchy(lpoints,loops_out,top,samples,contig_mem);
-        return make_temp_polygon_tree_range<Index,Coord>(lpoints.data(),top);
+        return make_temp_polygon_tree_range<Index,Coord,Tracker>(lpoints.data(),top,std::forward<Tracker>(tracker));
     } else {
-        return make_temp_polygon_range<Index,Coord>(lpoints,loops_out);
+        return make_temp_polygon_range<Index,Coord,Tracker>(lpoints,loops_out,std::forward<Tracker>(tracker));
     }
 }
 
 template<coordinate Coord,std::integral Index>
-template<bool TreeOut>
+template<bool TreeOut,typename Tracker>
 std::conditional_t<TreeOut,
-    temp_polygon_tree_range<Coord,Index>,
-    temp_polygon_range<Coord,Index>>
-clipper<Coord,Index>::execute(bool_op op) && {
+    temp_polygon_tree_range<Coord,Index,Tracker>,
+    temp_polygon_range<Coord,Index,Tracker>>
+clipper<Coord,Index>::execute(bool_op op,Tracker &&tracker) && {
     if(ran) reset();
 
-    do_op(op);
+    do_op(op,tracker.callbacks());
 
     if constexpr(TreeOut) {
         loop_hierarchy(lpoints,loops_out,top,samples,contig_mem);
         return make_temp_polygon_tree_range<Index,Coord>(
             std::move(lpoints),
             std::move(loops_out),
-            std::move(top));
+            std::move(top),
+            std::forward<Tracker>(tracker));
     } else {
         return make_temp_polygon_range<Index,Coord>(
             std::move(lpoints),
-            std::move(loops_out));
+            std::move(loops_out),
+            std::forward<Tracker>(tracker));
     }
 }
 
@@ -2228,6 +2360,236 @@ void clipper<Coord,Index>::reset() {
     samples.clear();
     sweep_nodes.resize(1);
     ran = false;
+}
+
+
+/**
+ * A convenience class that combines `clipper` with a specific `point_tracker`
+ */
+template<coordinate Coord,std::integral Index,point_tracker<Coord,Index> Tracker> class tclipper {
+public:
+    Tracker tracker;
+    [[no_unique_address]] clipper<Coord,Index> base;
+
+    explicit tclipper(std::pmr::memory_resource *_contig_mem=nullptr) requires(std::is_default_constructible_v<Tracker>) :
+        base{_contig_mem} {}
+
+    explicit tclipper(Tracker &&tracker,std::pmr::memory_resource *_contig_mem=nullptr) :
+        tracker{std::forward<Tracker>(tracker)}, base{_contig_mem} {}
+
+    tclipper(tclipper &&b) = default;
+
+    /**
+     * Calls `add_loops(std::forward<R>(loops),cat,tracker.callbacks())`
+     */
+    template<typename R> void add_loops(R &&loops,bool_set cat) {
+        static_assert(point_range_or_range_range<R,Coord>);
+        base.add_loops(loops,cat,tracker.callbacks());
+    }
+
+    /**
+     * Calls `add_loops(std::forward<R>(loops),bool_set::subject,tracker.callbacks())`
+     */
+    template<typename R> void add_loops_subject(R &&loops) {
+        static_assert(point_range_or_range_range<R,Coord>);
+        add_loops(std::forward<R>(loops),bool_set::subject,tracker.callbacks());
+    }
+
+    /**
+     * Calls `add_loops(std::forward<R>(loops),bool_set::clip,tracker.callbacks())`
+     */
+    template<typename R> void add_loops_clip(R &&loops) {
+        static_assert(point_range_or_range_range<R,Coord>);
+        add_loops(std::forward<R>(loops),bool_set::clip,tracker.callbacks());
+    }
+
+    /**
+     * Calls `base.add_loop(cat,tracker.callbacks())`
+     */
+    clipper<Coord,Index>::point_sink add_loop(bool_set cat) {
+        return base.add_loop(cat,tracker.callbacks());
+    }
+
+    /**
+     * Calls `base.reset()`
+     */
+    void reset() { base.reset(); }
+
+    /**
+     * Calls `base.template execute<TreeOut,Tracker&>(op,tracker)`
+     */
+    template<bool TreeOut>
+    std::conditional_t<TreeOut,
+        borrowed_temp_polygon_tree_range<Coord,Index,Tracker&>,
+        borrowed_temp_polygon_range<Coord,Index,Tracker&>>
+    execute(bool_op op) & { return base.template execute<TreeOut,Tracker&>(op,tracker); }
+
+    /**
+     * Calls `std::move(base).template execute<TreeOut,Tracker>(op,std::forward<Tracker>(tracker))`
+     */
+    template<bool TreeOut>
+    std::conditional_t<TreeOut,
+        temp_polygon_tree_range<Coord,Index,Tracker>,
+        temp_polygon_range<Coord,Index,Tracker>>
+    execute(bool_op op) && {
+        return std::move(base).template execute<TreeOut,Tracker>(op,std::forward<Tracker>(tracker));
+    }
+};
+
+
+/**
+ * Generate the union of a set of polygons.
+ *
+ * This is equivalent to calling `boolean_op` with an empty range passed to
+ * `clip` and `bool_op::union_` passed to `op`.
+ *
+ * `Coord` must satisfy `coordinate`.
+ * `Index` must satisfy `std::integral`.
+ * `Input` must satisfy `point_range_or_range_range`.
+ * `Tracker` must satisfy `point_tracker<Coord,Index>`.
+ */
+template<bool TreeOut,typename Coord,typename Index=std::size_t,typename Input,typename Tracker>
+std::conditional_t<TreeOut,
+    temp_polygon_tree_range<Coord,Index,Tracker>,
+    temp_polygon_range<Coord,Index,Tracker>>
+union_op(
+    Input &&input,
+    Tracker &&tracker,
+    std::pmr::memory_resource *contig_mem=nullptr)
+{
+    static_assert(point_tracker<Tracker,Coord,Index>);
+    static_assert(point_range_or_range_range<Input,Coord>);
+    static_assert(coordinate<Coord>);
+    static_assert(std::integral<Index>);
+
+    tclipper<Coord,Index,Tracker> n{std::forward<Tracker>(tracker),contig_mem};
+    n.add_loops(std::forward<Input>(input),bool_set::subject);
+    return std::move(n).template execute<TreeOut>(bool_op::union_);
+}
+
+/**
+ * Generate the union of a set of polygons.
+ *
+ * This is equivalent to calling `boolean_op` with an empty range passed to
+ * `clip` and `bool_op::union_` passed to `op`.
+ *
+ * `Coord` must satisfy `coordinate`.
+ * `Index` must satisfy `std::integral`.
+ * `Input` must satisfy `point_range_or_range_range`.
+ */
+template<bool TreeOut,typename Coord,typename Index=std::size_t,typename Input>
+auto union_op(Input &&input,std::pmr::memory_resource *contig_mem=nullptr) {
+    return union_op<TreeOut,Coord,Index,Input,null_tracker<Coord,Index>>(std::forward<Input>(input),{},contig_mem);
+}
+
+/**
+ * "Normalize" a set of polygons.
+ *
+ * This is equivalent to calling `boolean_op` with an empty range passed to
+ * `clip` and `bool_op::normalize` passed to `op`.
+ *
+ * `Coord` must satisfy `coordinate`.
+ * `Index` must satisfy `std::integral`.
+ * `Input` must satisfy `point_range_or_range_range`.
+ * `Tracker` must satisfy `point_tracker<Coord,Index>`.
+ */
+template<bool TreeOut,typename Coord,typename Index=std::size_t,typename Input,typename Tracker>
+std::conditional_t<TreeOut,
+    temp_polygon_tree_range<Coord,Index,Tracker>,
+    temp_polygon_range<Coord,Index,Tracker>>
+normalize_op(
+    Input &&input,
+    Tracker &&tracker,
+    std::pmr::memory_resource *contig_mem=nullptr)
+{
+    static_assert(point_tracker<Tracker,Coord,Index>);
+    static_assert(point_range_or_range_range<Input,Coord>);
+    static_assert(coordinate<Coord>);
+    static_assert(std::integral<Index>);
+
+    tclipper<Coord,Index,Tracker> n{std::forward<Tracker>(tracker),contig_mem};
+    n.add_loops(std::forward<Input>(input),bool_set::subject);
+    return std::move(n).template execute<TreeOut>(bool_op::normalize);
+}
+
+/**
+ * "Normalize" a set of polygons.
+ *
+ * This is equivalent to calling `boolean_op` with an empty range passed to
+ * `clip` and `bool_op::normalize` passed to `op`.
+ *
+ * `Coord` must satisfy `coordinate`.
+ * `Index` must satisfy `std::integral`.
+ * `Input` must satisfy `point_range_or_range_range`.
+ */
+template<bool TreeOut,typename Coord,typename Index=std::size_t,typename Input>
+auto normalize_op(Input &&input,std::pmr::memory_resource *contig_mem=nullptr) {
+    return normalize_op<TreeOut,Coord,Index,Input,null_tracker<Coord,Index>>(std::forward<Input>(input),{},contig_mem);
+}
+
+/**
+ * Perform a boolean operation on two sets of polygons.
+ *
+ * This is equivalent to the following:
+ *
+ *     tclipper<Coord,Index,Tracker> n{std::forward<Tracker>(tracker),contig_mem};
+ *     n.add_loops(std::forward<SInput>(subject),bool_set::subject);
+ *     n.add_loops(std::forward<CInput>(clip),bool_set::clip);
+ *     RETURN_VALUE = std::move(n).execute<TreeOut>(op);
+ * 
+ * `Coord` must satisfy `coordinate`.
+ * `Index` must satisfy `std::integral`.
+ * `SInput` must satisfy `point_range_or_range_range`.
+ * `CInput` must satisfy `point_range_or_range_range`.
+ * `Tracker` must satisfy `point_tracker<Coord,Index>`.
+ */
+template<bool TreeOut,typename Coord,typename Index=std::size_t,typename SInput,typename CInput,typename Tracker>
+std::conditional_t<TreeOut,
+    temp_polygon_tree_range<Coord,Index,Tracker>,
+    temp_polygon_range<Coord,Index,Tracker>>
+boolean_op(
+    SInput &&subject,
+    CInput &&clip,
+    bool_op op,
+    Tracker &&tracker,
+    std::pmr::memory_resource *contig_mem=nullptr)
+{
+    static_assert(point_tracker<Tracker,Coord,Index>);
+    static_assert(point_range_or_range_range<CInput,Coord>);
+    static_assert(point_range_or_range_range<SInput,Coord>);
+    static_assert(coordinate<Coord>);
+    static_assert(std::integral<Index>);
+
+    tclipper<Coord,Index,Tracker> n{std::forward<Tracker>(tracker),contig_mem};
+    n.add_loops(std::forward<SInput>(subject),bool_set::subject);
+    n.add_loops(std::forward<CInput>(clip),bool_set::clip);
+    return std::move(n).template execute<TreeOut>(op);
+}
+
+
+/**
+ * Perform a boolean operation on two sets of polygons.
+ *
+ * This is equivalent to the following:
+ *
+ *     clipper<Coord,Index> n{contig_mem};
+ *     n.add_loops(std::forward<SInput>(subject),bool_set::subject);
+ *     n.add_loops(std::forward<CInput>(clip),bool_set::clip);
+ *     RETURN_VALUE = std::move(n).execute<TreeOut>(op);
+ * 
+ * `Coord` must satisfy `coordinate`.
+ * `Index` must satisfy `std::integral`.
+ * `SInput` must satisfy `point_range_or_range_range`.
+ * `CInput` must satisfy `point_range_or_range_range`.
+ */
+template<bool TreeOut,typename Coord,typename Index=std::size_t,typename SInput,typename CInput>
+auto boolean_op(SInput &&subject,CInput &&clip,bool_op op,std::pmr::memory_resource *contig_mem=nullptr) {
+    return boolean_op<TreeOut,Coord,Index,CInput,SInput,null_tracker<Coord,Index>>(
+        std::forward<SInput>(subject),
+        std::forward<CInput>(clip),
+        op,
+        {},
+        contig_mem);
 }
 
 } // namespace poly_ops

@@ -1,0 +1,82 @@
+DOXYFILE_ENCODING      = UTF-8
+PROJECT_NAME           = "polyops"
+
+OUTPUT_DIRECTORY       = ${CMAKE_CURRENT_BINARY_DIR}
+
+ALLOW_UNICODE_NAMES    = NO
+OUTPUT_LANGUAGE        = English
+INLINE_INHERITED_MEMB  = NO
+INHERIT_DOCS           = YES
+TAB_SIZE               = 4
+MARKDOWN_SUPPORT       = YES
+MARKDOWN_ID_STYLE      = DOXYGEN
+AUTOLINK_SUPPORT       = YES
+BUILTIN_STL_SUPPORT    = NO
+SIP_SUPPORT            = NO
+DISTRIBUTE_GROUP_DOC   = NO
+GROUP_NESTED_COMPOUNDS = NO
+SUBGROUPING            = YES
+INLINE_GROUPED_CLASSES = NO
+INLINE_SIMPLE_STRUCTS  = NO
+LOOKUP_CACHE_SIZE      = 0
+TIMESTAMP              = NO
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+GENERATE_AUTOGEN_DEF   = NO
+GENERATE_PERLMOD       = NO
+
+EXTRACT_ALL            = YES
+RESOLVE_UNNAMED_PARAMS = YES
+HIDE_FRIEND_COMPOUNDS  = NO
+HIDE_IN_BODY_DOCS      = YES
+INTERNAL_DOCS          = NO
+HIDE_SCOPE_NAMES       = YES
+SHOW_HEADERFILE        = NO
+SHOW_GROUPED_MEMB_INC  = NO
+INLINE_INFO            = NO
+
+QUIET                  = NO
+WARNINGS               = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_IF_INCOMPLETE_DOC = YES
+WARN_NO_PARAMDOC       = NO
+WARN_IF_UNDOC_ENUM_VAL = NO
+WARN_AS_ERROR          = NO
+
+INPUT                  = "${CMAKE_SOURCE_DIR}/include/poly_ops/base.hpp" \
+                         "${CMAKE_SOURCE_DIR}/include/poly_ops/clip.hpp" \
+                         "${CMAKE_SOURCE_DIR}/include/poly_ops/large_ints.hpp" \
+                         "${CMAKE_SOURCE_DIR}/include/poly_ops/offset.hpp" \
+                         "${CMAKE_SOURCE_DIR}/include/poly_ops/polydraw.hpp"
+
+INPUT_ENCODING         = UTF-8
+EXCLUDE_SYMBOLS        = "detail"
+
+# Do not use markdown to include images. Use
+# "\verbatim embed:rst:leading-asterisk" to embed reStructuredText. Otherwise
+# the images get copied to the Doxygen output directory before being copied to
+# the Sphinx output directory and if the image is also referenced by
+# reStructuredText, it ends up included twice.
+IMAGE_PATH             =
+
+SOURCE_BROWSER         = NO
+INLINE_SOURCES         = NO
+REFERENCED_BY_RELATION = NO
+REFERENCES_RELATION    = NO
+VERBATIM_HEADERS       = NO
+
+GENERATE_XML           = YES
+XML_OUTPUT             = xml
+XML_PROGRAMLISTING     = NO
+
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = DOXYGEN_PARSING \
+                         _POLY_OPS_FORCE_INLINE= \
+                         _POLY_OPS_ARTIFICIAL= \
+                         _POLY_OPS_RESTRICT=
+SEARCH_INCLUDES        = YES
+SKIP_FUNCTION_MACROS   = YES
+
+HAVE_DOT               = NO

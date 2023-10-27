@@ -241,4 +241,5 @@ int main() {
     } | gen_random_compound_int_pairs<4>();
 #endif
 
+    return 0;
 }
