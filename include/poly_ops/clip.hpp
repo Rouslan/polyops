@@ -144,8 +144,8 @@ template<typename Coord,typename Index=std::size_t> struct null_tracker;
 
 /**
  * `null_tracker` is stateless. The clipper data types use
- * `[[no_unique_address]]` after pointers to trackers, so an empty struct is
- * used instead of a real pointer for `null_tracker`.
+ * `[[no_unique_address]]` on pointers to trackers, so an empty struct is used
+ * instead of a real pointer for `null_tracker`.
  */
 template<typename Coord,typename Index> struct null_tracker_ptr {
     null_tracker<Coord,Index> operator*() const noexcept;
@@ -1419,10 +1419,10 @@ template<typename Coord,typename Index=std::size_t,typename Tracker=null_tracker
 namespace detail {
 
 template<typename Tracker,typename LPoints,bool IsPtr> struct tracked_points {
-    Tracker _tracker;
-    [[no_unique_address]] LPoints lpoints;
+    [[no_unique_address]] Tracker _tracker;
+    LPoints lpoints;
 
-    auto tracker() noexcept {
+    auto tracker() const noexcept {
         if constexpr(IsPtr) { return _tracker; }
         else { return &_tracker; }
     }
@@ -1509,6 +1509,13 @@ template<typename R,typename F> struct range_facade {
 
     auto begin() noexcept { return iterator_facade<std::ranges::iterator_t<R>,F>{std::ranges::begin(base),&fun}; }
     auto end() noexcept { return iterator_facade<std::ranges::iterator_t<R>,F>{std::ranges::end(base),&fun}; }
+
+    auto begin() const noexcept requires std::is_invocable_v<const F,std::ranges::range_value_t<R>> {
+        return iterator_facade<std::ranges::iterator_t<const R>,const F>{std::ranges::begin(base),&fun};
+    }
+    auto end() const noexcept requires std::is_invocable_v<const F,std::ranges::range_value_t<R>> {
+        return iterator_facade<std::ranges::iterator_t<const R>,const F>{std::ranges::end(base),&fun};
+    }
 };
 
 template<typename R,typename F> range_facade(R &&base,F &&fun)
@@ -1524,7 +1531,7 @@ auto make_temp_polygon_tree_range(
     return range_facade(
         top,
         [tl=make_tracked_points(tracker,lpoints)]
-        (const temp_polygon<Index> *poly) mutable {
+        (const temp_polygon<Index> *poly) {
             return temp_polygon_proxy<Coord,Index,Tracker>(tl.lpoints,*poly,tl.tracker());
         });
 }
@@ -1543,8 +1550,8 @@ public:
 private:
     friend class temp_polygon_proxy<Coord,Index,Tracker>;
 
-    tracker_ptr tracker;
-    [[no_unique_address]] const detail::loop_point<Index,Coord> *lpoints;
+    [[no_unique_address]] tracker_ptr tracker;
+    const detail::loop_point<Index,Coord> *lpoints;
     Index i;
 
     /* Loops have the same "i" value for "begin()" and "end()" thus a different
@@ -1626,7 +1633,7 @@ public:
 
     /** Return a range representing the children of this polygon. */
     auto inner_loops() const noexcept {
-        return detail::make_temp_polygon_tree_range<Index,Coord,Tracker>(lpoints,data.children,tracker);
+        return detail::make_temp_polygon_tree_range<Index,Coord,Tracker>(lpoints,data.children,*tracker);
     }
 };
 
@@ -1649,7 +1656,7 @@ template<typename Index,typename Coord,typename Tracker> auto make_temp_polygon_
     return range_facade(
         std::move(top),
         [tl=make_tracked_points(std::forward<Tracker>(tracker),std::move(lpoints)),loops=std::move(loops)]
-        (const temp_polygon<Index> *poly) mutable {
+        (const temp_polygon<Index> *poly) {
             return temp_polygon_proxy<Coord,Index,Tracker>(tl.lpoints.data(),*poly,tl.tracker());
         });
 }
@@ -1662,7 +1669,7 @@ template<typename Index,typename Coord,typename Tracker> auto make_temp_polygon_
     return range_facade(
         std::move(loops),
         [tl=make_tracked_points(std::forward<Tracker>(tracker),std::move(lpoints))]
-        (const temp_polygon<Index> &poly) mutable {
+        (const temp_polygon<Index> &poly) {
             return temp_polygon_proxy<Coord,Index,Tracker>(tl.lpoints.data(),poly,tl.tracker());
         });
 }
@@ -1675,7 +1682,7 @@ template<typename Index,typename Coord,typename Tracker> auto make_temp_polygon_
     return range_facade(
         loops,
         [tl=make_tracked_points(std::forward<Tracker>(tracker),lpoints.data())]
-        (const temp_polygon<Index> &poly) mutable {
+        (const temp_polygon<Index> &poly) {
             return temp_polygon_proxy<Coord,Index,Tracker>(tl.lpoints,poly,tl.tracker());
         });
 }
@@ -2368,8 +2375,8 @@ void clipper<Coord,Index>::reset() {
  */
 template<coordinate Coord,std::integral Index,point_tracker<Coord,Index> Tracker> class tclipper {
 public:
-    Tracker tracker;
-    [[no_unique_address]] clipper<Coord,Index> base;
+    [[no_unique_address]] Tracker tracker;
+    clipper<Coord,Index> base;
 
     explicit tclipper(std::pmr::memory_resource *_contig_mem=nullptr) requires(std::is_default_constructible_v<Tracker>) :
         base{_contig_mem} {}

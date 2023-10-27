@@ -302,7 +302,7 @@ template<typename T> struct point_t {
 
     /** Construct `point_t` from any point-like object */
     template<point<T> U> constexpr point_t(const U &b)
-        noexcept(noexcept(point_t(point_ops<U>::get_x(b)),point_ops<U>::get_y(b)))
+        noexcept(noexcept(point_t(point_ops<U>::get_x(b),point_ops<U>::get_y(b))))
         : _data{point_ops<U>::get_x(b),point_ops<U>::get_y(b)} {}
     
     constexpr point_t &operator=(const point_t &b) noexcept(std::is_nothrow_copy_constructible_v<T>) = default;
