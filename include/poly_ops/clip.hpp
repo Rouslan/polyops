@@ -29,15 +29,6 @@ inside functions marked as "noexcept". In such cases, "assert" is used. */
 #define POLY_OPS_GRAPHICAL_DEBUG 0
 #endif
 
-#ifndef POLY_OPS_ASSERT
-#define POLY_OPS_ASSERT assert
-#endif
-
-// used for checks that will significantly slow down the algorithm
-#ifndef POLY_OPS_ASSERT_SLOW
-#define POLY_OPS_ASSERT_SLOW(X) (void)0
-#endif
-
 // the graphical test program defines these
 #ifndef POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F
 #define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F
@@ -94,17 +85,24 @@ public:
     virtual void point_merge(Index from,Index to) = 0;
 
     /**
-     * Called when a point's coordinates are changed.
+     * Called when one point is duplicated and another is discarded.
      *
-     * The coordinates of `p` are changed to the original coordinates of `to`
-     * (the coordinates that `to` had before any call to `point_move`). The
-     * point at "to" itself is not affected in any way.
+     * Just as with "point_added", the implicit index of the new duplicate point
+     * is one greater than the index of the previously added point. Indices are
+     * never reused, thus deletions do not affect index assignment.
+     *
+     * Here, deletion means the point is never referenced again. It is not
+     * actually deleted from the internal representation, which is why the index
+     * cannot be reused.
+     *
+     * "to_delete" can be ignored. It is given so that if tracked points require
+     * memory allocation, its memory can be reused for the duplicate point.
      *
      * This method will be called, at most, as many times are there are
      * intersections plus the number of loops. In the case of the `union`
      * operation, it is never called.
      */
-    virtual void point_move(Index p,Index to) = 0;
+    virtual void point_copy_and_delete(Index to_copy,Index to_delete) = 0;
 
     /**
      * Called for every point initially added.
@@ -112,7 +110,7 @@ public:
      * Every added point has an implicit index (this index is unrelated to
      * `original_i`). This method is first called when point zero is added.
      * Every subsequent call corresponds to the index that is one greater than
-     * the previous call.
+     * the index of the previously added point.
      *
      * `original_i` is the index of the input point that the added point
      * corresponds to. The value is what the array index of the original point
@@ -130,7 +128,7 @@ public:
      *
      * This only happens when a polygon is added with fewer than three points.
      * The clipper class doesn't work with such polygons and after counting the
-     * number of points added, will remove the points of the those polygons.
+     * number of points added, will remove the points of those polygons.
      *
      * \param n The number of points to remove. This will be equal to 1 or 2.
      */
@@ -251,6 +249,7 @@ template<typename Index,typename Coord> struct loop_point {
         : data{data}, next{next}, aux{line_desc{cat,line_state_t::undef}} {}
     
     bool has_line_bal() const {
+        POLY_OPS_ASSERT(aux.desc.state != line_state_t::check);
         switch(aux.desc.state) {
         case line_state_t::undef:
         case line_state_t::check:
@@ -282,54 +281,6 @@ template<typename Index,typename Coord> struct loop_point {
         swap(a.next,b.next);
         swap(a.aux,b.aux);
     }
-};
-
-template<typename Index> struct segment_common {
-    Index a;
-    Index b;
-
-    segment_common() = default;
-    segment_common(Index a,Index b) noexcept : a{a}, b{b} {}
-    segment_common(const segment_common&) = default;
-
-    /* returns true if point 'a' comes before point 'b' in the loop */
-    template<typename T> bool a_is_main(const T &points) const {
-        POLY_OPS_ASSERT(points[a].next == b || points[b].next == a);
-        return points[a].next == b;
-    }
-
-    friend bool operator==(const segment_common &a,const segment_common &b) {
-        return a.a == b.a && a.b == b.b;
-    }
-
-protected:
-    ~segment_common() = default;
-};
-
-template<typename Index> struct segment : segment_common<Index> {
-    using segment_common<Index>::segment_common;
-
-    segment(const segment_common<Index> &s) noexcept : segment_common<Index>(s) {}
-
-    auto a_x(const auto &points) const { return points[this->a].data[0]; }
-    auto a_y(const auto &points) const { return points[this->a].data[1]; }
-    auto b_x(const auto &points) const { return points[this->b].data[0]; }
-    auto b_y(const auto &points) const { return points[this->b].data[1]; }
-};
-
-template<typename Index,typename Coord> struct cached_segment : segment_common<Index> {
-    point_t<Coord> pa;
-    point_t<Coord> pb;
-
-    cached_segment() = default;
-    cached_segment(Index a,Index b,const point_t<Coord> &pa,const point_t<Coord> &pb)
-        noexcept(std::is_nothrow_copy_constructible_v<point_t<Coord>>)
-        : segment_common<Index>{a,b}, pa{pa}, pb{pb} {}
-    template<typename T> cached_segment(const segment_common<Index> &s,const T &points)
-        : segment_common<Index>{s}, pa{points[s.a].data}, pb{points[s.b].data} {}
-    template<typename T> cached_segment(Index a,Index b,const T &points)
-        : segment_common<Index>{a,b}, pa{points[a].data}, pb{points[b].data} {}
-    cached_segment(const cached_segment&) = default;
 };
 
 /* The order of these determines their priority from greatest to least.
@@ -1206,68 +1157,32 @@ bool consistent_order(const sweep_t<Index,Coord> &sweep) {
     return true;
 }
 
-template<typename Index> struct broken_starts_stack {
-    using allocator_type = std::pmr::polymorphic_allocator<Index>;
-
-    std::pmr::vector<Index> items;
-    std::size_t cur;
-
-    broken_starts_stack(const allocator_type &alloc) : items(alloc), cur(0) {}
-};
-
 template<typename Index,typename Coord>
-using broken_starts_t = std::pmr::map<point_t<Coord>,broken_starts_stack<Index>,point_less>;
+using broken_starts_t = std::pmr::map<point_t<Coord>,std::pmr::vector<Index>,point_less>;
+
+template<typename Index> using broken_ends_t = std::pmr::vector<Index>;
 
 /* Follow the points connected to the point at "intr" until another intersection
-is reached or we wrapped around. Along the way, update the "aux.desc.state"
-value to the value at "intr", and if "aux.desc.state" at "intr" is not
-"line_state_t::keep" or "line_state_t::keep_rev", merge all the point values
-into "intr" via the point tracker.
+is reached or we wrapped around. Along the way, update the "state()" value to
+the value at "intr", and if "state()" at "intr" is not "line_state_t::keep" or
+"line_state_t::keep_rev", merge all the point values into "intr" via the point
+tracker.
 
-If "aux.desc.state" at "intr" is one of the "keep" values and the "state" of the
-next intersection is not, add the point before the intersection to "broken_ends.
-If vice-versa, add the intersecting point to "broken_starts". */
+If "state()" at "intr" is one of the "keep" values and the "state" of the next
+intersection is not, add the point before the intersection to "broken_ends. If
+vice-versa, add the intersecting point to "broken_starts". */
 template<typename Index,typename Coord>
 void follow_balance(
-    loop_point<Index,Coord> *points,
+    std::pmr::vector<loop_point<Index,Coord>> &points,
     Index intr,
-    std::pmr::vector<Index> &broken_ends,
+    broken_ends_t<Index> &broken_ends,
     broken_starts_t<Index,Coord> &broken_starts,
     i_point_tracker<Index> *pt)
 {
     POLY_OPS_ASSERT(points[intr].has_line_bal());
     Index next = points[intr].next;
     Index prev = intr;
-    for(;;) {
-        POLY_OPS_ASSERT(points[next].state() != line_state_t::check);
-        if(points[next].has_line_bal()) {
-            switch(points[intr].state()) {
-            case line_state_t::discard:
-                if(pt) pt->point_merge(prev,next);
-                break;
-            case line_state_t::keep:
-                broken_starts[points[intr].data].items.push_back(intr);
-                broken_ends.push_back(prev);
-                break;
-            case line_state_t::keep_rev:
-                /* Reversing the direction of the lines leaves us with a missing
-                line at the end (which is now the start) and an extra line at
-                the start (now the end), so the first point (intr) is repurposed
-                into the new end point. The point before the first might not
-                have been processed yet, so the coordinates of the point are not
-                updated until the broken starts and ends are recombined. */
-                broken_starts[points[next].data].items.push_back(intr);
-                broken_ends.push_back(prev == intr ? intr : points[intr].next);
-                points[intr].next = prev;
-                if(pt) pt->point_move(intr,next);
-                break;
-            default:
-                POLY_OPS_ASSERT(false);
-            }
-
-            break;
-        }
-
+    while(!points[next].has_line_bal()) {
         Index real_next_next = points[next].next;
 
         points[next].state() = points[intr].state();
@@ -1279,6 +1194,45 @@ void follow_balance(
 
         prev = next;
         next = real_next_next;
+    }
+
+    Index new_i;
+
+    switch(points[intr].state()) {
+    case line_state_t::discard:
+        if(pt) pt->point_merge(prev,next);
+        break;
+    case line_state_t::keep:
+        broken_starts[points[intr].data].push_back(intr);
+        broken_ends.push_back(prev);
+        break;
+    case line_state_t::keep_rev:
+        /* Reversing the direction of the lines leaves us with a missing line at
+        the end (which is now the start) and an extra line at the start (now the
+        end). We need the old coordinates of the former start to serve as the
+        end-point of the prior point, so the prior line can be rejoined later,
+        but we also need the new coordinates of the new start to calculate line
+        angles later, thus a new point is made for the new start and the old
+        start is given the state of "discard". */
+        new_i = static_cast<Index>(points.size());
+        broken_starts[points[next].data].push_back(new_i);
+        points.push_back(points[next]);
+        points[intr].state() = line_state_t::discard;
+        points.back().next = prev;
+
+        /* it doesn't matter whether the state is "keep" or "keep_rev" at this
+        point */
+        points.back().state() = line_state_t::keep_rev;
+
+        /* The new second-last point is the point after "intr". If the point
+        after "intr" is the old last point, the second-last point is the new
+        first point. */
+        broken_ends.push_back(prev == intr ? new_i : points[intr].next);
+
+        if(pt) pt->point_copy_and_delete(next,intr);
+        break;
+    default:
+        POLY_OPS_ASSERT(false);
     }
 }
 
@@ -1764,7 +1718,7 @@ template<coordinate Coord,std::integral Index=std::size_t> class clipper {
     std::pmr::vector<detail::sweep_node<Index,Coord>> sweep_nodes;
 
     detail::broken_starts_t<Index,Coord> broken_starts;
-    std::pmr::vector<Index> broken_ends;
+    detail::broken_ends_t<Index> broken_ends;
     detail::rand_generator rgen;
     Index original_i;
     bool ran;
@@ -2250,7 +2204,7 @@ void clipper<Coord,Index>::do_op(bool_op op,i_point_tracker<Index> *pt) {
     calc_line_bal(op);
 
     for(auto &intr : samples) {
-        detail::follow_balance<Index,Coord>(lpoints.data(),intr.p,broken_ends,broken_starts,pt);
+        detail::follow_balance<Index,Coord>(lpoints,intr.p,broken_ends,broken_starts,pt);
     }
 
 #if POLY_OPS_GRAPHICAL_DEBUG
@@ -2260,51 +2214,42 @@ void clipper<Coord,Index>::do_op(bool_op op,i_point_tracker<Index> *pt) {
 
     /* match all the points in broken_starts and broken_ends to make new loops
     with the remaining lines */
-    for(auto intr : broken_ends) {
+    for(Index intr : broken_ends) {
         auto p = end_point(lpoints,intr);
         auto os = broken_starts.find(p);
 
-        POLY_OPS_ASSERT(os != broken_starts.end() && !os->second.items.empty() && os->second.cur < os->second.items.size());
+        POLY_OPS_ASSERT(os != broken_starts.end() && !os->second.empty());
 
-        Index b_start = static_cast<Index>(os->second.cur);
+        Index b_start = 0;
 
-        /* to minimize the number of holes, always connect to the line that
-        results in the greatest clock-wise turn */
-        if(os->second.cur+1 < os->second.items.size()) {
-            bool right = !large_ints::negative(triangle_winding(lpoints[intr].data,p,end_point(lpoints,os->second.items[b_start])));
-            for(Index i=b_start+1; i<static_cast<Index>(os->second.items.size()); ++i) {
-                bool i_left = large_ints::negative(triangle_winding(lpoints[intr].data,p,end_point(lpoints,os->second.items[i])));
-                bool left_of_bs = large_ints::negative(triangle_winding(p,end_point(lpoints,os->second.items[b_start]),end_point(lpoints,os->second.items[i])));
-                if(right ? (i_left || left_of_bs) : (i_left && left_of_bs)) continue;
-                b_start = i;
+        /* to minimize the number of holes and prevent overlapping points in
+        loops, always connect to the line that results in the greatest
+        clock-wise turn */
+        if(os->second.size() > 1) {
+            bool left = large_ints::negative(triangle_winding(lpoints[intr].data,p,end_point(lpoints,os->second[b_start])));
+            for(Index i=1; i<static_cast<Index>(os->second.size()); ++i) {
+                bool i_left = large_ints::negative(triangle_winding(lpoints[intr].data,p,end_point(lpoints,os->second[i])));
+                bool left_of_bs = large_ints::negative(triangle_winding(p,end_point(lpoints,os->second[b_start]),end_point(lpoints,os->second[i])));
+                if(!(left ? (i_left && left_of_bs) : (i_left || left_of_bs))) {
+                    b_start = i;
+                    left = i_left;
+                }
             }
         }
 
-        //if(pt) pt->point_merge(lpoints[intr].next,b_start);
-
-        if(b_start != static_cast<Index>(os->second.cur)) {
-            std::swap(os->second.items[b_start],os->second.items[os->second.cur]);
+        lpoints[intr].next = os->second[b_start];
+        if(b_start != static_cast<Index>(os->second.size() - 1)) {
+            std::swap(os->second[b_start],os->second.back());
         }
-        lpoints[intr].next = os->second.items[os->second.cur++];
+        os->second.pop_back();
     }
 
     // there shouldn't be any left
     POLY_OPS_ASSERT(std::all_of(
         broken_starts.begin(),
         broken_starts.end(),
-        [](const typename detail::broken_starts_t<Index,Coord>::value_type &v) {
-            return v.second.cur == v.second.items.size();
-        }));
+        [](const auto &v) { return v.second.empty(); }));
     
-    /* If a point had a state of "keep_rev", it was moved by
-    "detail::follow_balance()" but didn't have the coordinates updated. Update
-    them now. */
-    for(auto &bs_item : broken_starts) {
-        for(auto i : bs_item.second.items) {
-            lpoints[i].data = bs_item.first;
-        }
-    }
-
 #if POLY_OPS_GRAPHICAL_DEBUG
     delegate_drawing_trimmed(lpoints);
 #endif

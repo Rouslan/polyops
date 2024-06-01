@@ -2,56 +2,58 @@ poly_ops/base.hpp
 =================
 
 
+.. cpp:namespace:: poly_ops
+
 Concepts
 -----------
 
-.. doxygenconcept:: poly_ops::coordinate
+.. doxygenconcept:: coordinate
 
 -----------------------------
 
-.. doxygenconcept:: poly_ops::point
+.. doxygenconcept:: point
 
 -----------------------------
 
-.. doxygenconcept:: poly_ops::point_range
+.. doxygenconcept:: point_range
 
 -----------------------------
 
-.. doxygenconcept:: poly_ops::point_range_range
+.. doxygenconcept:: point_range_range
 
 -----------------------------
 
-.. doxygenconcept:: poly_ops::point_range_or_range_range
+.. doxygenconcept:: point_range_or_range_range
 
 
 Types
 ------------------
 
-.. doxygentypedef:: poly_ops::long_coord_t
+.. doxygentypedef:: long_coord_t
 
 -----------------------------
 
-.. doxygentypedef:: poly_ops::real_coord_t
+.. doxygentypedef:: real_coord_t
 
 -----------------------------
 
-.. doxygenstruct:: poly_ops::point_ops
+.. doxygenstruct:: point_ops
 
 -----------------------------
 
-.. doxygenstruct:: poly_ops::coord_ops
+.. doxygenstruct:: coord_ops
     :members:
     :undoc-members:
 
 -----------------------------
 
-.. doxygenstruct:: poly_ops::point_t
+.. doxygenstruct:: point_t
     :members:
     :undoc-members:
 
 -----------------------------
 
-.. doxygenclass:: poly_ops::winding_dir_sink
+.. doxygenclass:: winding_dir_sink
     :members:
     :undoc-members:
 
@@ -59,64 +61,64 @@ Types
 Functions
 ----------------
 
-.. doxygenfunction:: poly_ops::operator+(const point_t<T>&,const point_t<U>&)
+.. doxygenfunction:: operator+(const point_t<T>&,const point_t<U>&)
 
 -----------------------------
 
-.. doxygenfunction:: poly_ops::operator-(const point_t<T>&,const point_t<U>&)
+.. doxygenfunction:: operator-(const point_t<T>&,const point_t<U>&)
 
 -----------------------------
 
-.. doxygenfunction:: poly_ops::operator*(const point_t<T>&,const point_t<U>&)
+.. doxygenfunction:: operator*(const point_t<T>&,const point_t<U>&)
 
 -----------------------------
 
-.. doxygenfunction:: poly_ops::operator*(const point_t<T>&,U)
+.. doxygenfunction:: operator*(const point_t<T>&,U)
 
 -----------------------------
 
-.. doxygenfunction:: poly_ops::operator*(T,const point_t<U>&)
+.. doxygenfunction:: operator*(T,const point_t<U>&)
 
 -----------------------------
 
-.. doxygenfunction:: poly_ops::operator/(const point_t<T>&,const point_t<U>&)
+.. doxygenfunction:: operator/(const point_t<T>&,const point_t<U>&)
 
 -----------------------------
 
-.. doxygenfunction:: poly_ops::operator==(const point_t<T>&,const point_t<T>&)
+.. doxygenfunction:: operator==(const point_t<T>&,const point_t<T>&)
 
 -----------------------------
 
-.. doxygenfunction:: poly_ops::operator!=(const point_t<T>&,const point_t<T>&)
+.. doxygenfunction:: operator!=(const point_t<T>&,const point_t<T>&)
 
 -----------------------------
 
-.. doxygenfunction:: poly_ops::vdot
+.. doxygenfunction:: vdot
 
 -----------------------------
 
-.. doxygenfunction:: poly_ops::square
+.. doxygenfunction:: square
 
 -----------------------------
 
-.. doxygenfunction:: poly_ops::vcast
+.. doxygenfunction:: vcast
 
 -----------------------------
 
-.. doxygenfunction:: poly_ops::vround
+.. doxygenfunction:: vround
 
 -----------------------------
 
-.. doxygenfunction:: poly_ops::vmag
+.. doxygenfunction:: vmag
 
 -----------------------------
 
-.. doxygenfunction:: poly_ops::vangle
+.. doxygenfunction:: vangle
 
 -----------------------------
 
-.. doxygenfunction:: poly_ops::triangle_winding
+.. doxygenfunction:: triangle_winding
 
 -----------------------------
 
-.. doxygenfunction:: poly_ops::winding_dir
+.. doxygenfunction:: winding_dir

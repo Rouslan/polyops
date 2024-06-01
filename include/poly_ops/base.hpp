@@ -11,6 +11,16 @@
 #include "large_ints.hpp"
 
 
+#ifndef POLY_OPS_ASSERT
+#define POLY_OPS_ASSERT assert
+#endif
+
+// used for checks that will significantly slow down the algorithm
+#ifndef POLY_OPS_ASSERT_SLOW
+#define POLY_OPS_ASSERT_SLOW(X) (void)0
+#endif
+
+
 namespace poly_ops {
 
 /**
@@ -536,8 +546,9 @@ public:
 };
 
 /**
- * Returns a positive number if clockwise, negative if counter-clockwise and
- * zero if degenerate or exactly half of the polygon's area is inverted.
+ * Returns a positive number if mostly clockwise, negative if mostly
+ * counter-clockwise and zero if degenerate or exactly half of the polygon's
+ * area is inverted.
  *
  * This algorithm works on any polygon. For non-overlapping non-inverting
  * polygons, more efficient methods exist.
@@ -552,6 +563,59 @@ long_coord_t<Coord> winding_dir(Points &&points) {
     while(++itr != end) sink(*itr);
     return sink.close();
 }
+
+namespace detail {
+
+template<typename Index> struct segment_common {
+    Index a;
+    Index b;
+
+    segment_common() = default;
+    segment_common(Index a,Index b) noexcept : a{a}, b{b} {}
+    segment_common(const segment_common&) = default;
+
+    /* returns true if point 'a' comes before point 'b' in the loop */
+    template<typename T> bool a_is_main(const T &points) const {
+        POLY_OPS_ASSERT(points[a].next == b || points[b].next == a);
+        return points[a].next == b;
+    }
+
+    friend bool operator==(const segment_common &a,const segment_common &b) {
+        return a.a == b.a && a.b == b.b;
+    }
+
+protected:
+    ~segment_common() = default;
+};
+
+template<typename Index> struct segment : segment_common<Index> {
+    using segment_common<Index>::segment_common;
+
+    segment(const segment_common<Index> &s) noexcept : segment_common<Index>(s) {}
+
+    auto a_x(const auto &points) const { return points[this->a].data[0]; }
+    auto a_y(const auto &points) const { return points[this->a].data[1]; }
+    auto b_x(const auto &points) const { return points[this->b].data[0]; }
+    auto b_y(const auto &points) const { return points[this->b].data[1]; }
+};
+
+template<typename Index,typename Coord> struct cached_segment : segment_common<Index> {
+    point_t<Coord> pa;
+    point_t<Coord> pb;
+
+    cached_segment() = default;
+    cached_segment(Index a,Index b,const point_t<Coord> &pa,const point_t<Coord> &pb)
+        noexcept(std::is_nothrow_copy_constructible_v<point_t<Coord>>)
+        : segment_common<Index>{a,b}, pa{pa}, pb{pb} {}
+    template<typename T> cached_segment(const segment_common<Index> &s,const T &points)
+        : segment_common<Index>{s}, pa{points[s.a].data}, pb{points[s.b].data} {}
+    template<typename T> cached_segment(Index a,Index b,const T &points)
+        : segment_common<Index>{a,b}, pa{points[a].data}, pb{points[b].data} {}
+    cached_segment(const cached_segment&) = default;
+    cached_segment &operator=(const cached_segment&) = default;
+};
+
+} // namespace detail
 
 } // namespace poly_ops
 

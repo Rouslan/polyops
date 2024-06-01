@@ -60,14 +60,11 @@ x86-64 */
 #      if _MSC_VER >= 1920
 #        undef _POLY_OPS_IMPL_HAVE_DIVX
 #        define _POLY_OPS_IMPL_HAVE_DIVX 1
-#        pragma intrinsic(_div128)
+#        pragma intrinsic(_div128,_udiv128)
 #        define _POLY_OPS_MSVC_DIV _div128
 #        define _POLY_OPS_MSVC_UDIV _udiv128
 #      endif
-#      pragma intrinsic(_mul128)
-#      pragma intrinsic(_umul128)
-#      pragma intrinsic(_addcarry_u64)
-#      pragma intrinsic(_subborrow_u64)
+#      pragma intrinsic(_mul128,_umul128,_addcarry_u64,_subborrow_u64)
 #      define _POLY_OPS_INTEL_ADDCARRY _addcarry_u64
 #      define _POLY_OPS_INTEL_SUBBORROW _subborrow_u64
 #      undef _POLY_OPS_IMPL_HAVE_MUL128
@@ -76,12 +73,11 @@ x86-64 */
 #      if _MSC_VER >= 1920
 #        undef _POLY_OPS_IMPL_HAVE_DIVX
 #        define _POLY_OPS_IMPL_HAVE_DIVX 1
-#        pragma intrinsic(_div64)
+#        pragma intrinsic(_div64,_udiv64)
 #        define _POLY_OPS_MSVC_DIV _div64
 #        define _POLY_OPS_MSVC_UDIV _udiv64
 #      endif
-#      pragma intrinsic(_addcarry_u32)
-#      pragma intrinsic(_subborrow_u32)
+#      pragma intrinsic(_addcarry_u32,_subborrow_u32)
 #      define _POLY_OPS_INTEL_ADDCARRY _addcarry_u32
 #      define _POLY_OPS_INTEL_SUBBORROW _subborrow_u32
 #    endif
@@ -213,7 +209,7 @@ namespace detail {
             (sizeof(T) + sizeof(full_int) - (signed_integral<T> || !Signed)) / sizeof(full_int)> {};
 
     /* The value represented by this value is the number of full_uint instances
-    the would be required to store all the bits of the integer-like T type. If
+    that would be required to store all the bits of the integer-like T type. If
     Signed is true, one bit is reserved for the sign bit, which means if T is
     unsigned, one more bit is required.
 
@@ -1182,9 +1178,10 @@ auto unmul(const T &a,const U &b,modulo_t::type<Mod> = {}) noexcept {
         }
 #  endif
         if constexpr(Signed && Mod == modulo_t::euclid_v) {
-            if((compi_hi<3>(a) ^ compi_hi<2>(b)) & compi_hi<1>(r.rem)) {
+            r.rem = abs(r.rem);
+            if(compi_hi<3>(a) ^ compi_hi<2>(b)) {
                 r.quot -= 1;
-                r.rem = abs(b) - abs(r.rem);
+                r.rem = abs(b) - r.rem;
             }
         }
     } else
@@ -1310,12 +1307,10 @@ auto divmod(const T &a,const U &b,modulo_t::type<Mod>) noexcept {
         r.rem = a_tmp % b_tmp;
 
         if constexpr(signed_ && Mod == modulo_t::euclid_v) {
-            if(compi_hi<1,signed_>(r.rem)) {
-                r.rem = abs(r.rem);
-                if((sign(a_tmp) ^ sign(b_tmp))) {
-                    r.rem = abs(b_tmp) - r.rem;
-                    r.quot -= 1;
-                }
+            r.rem = abs(r.rem);
+            if((sign(a_tmp) ^ sign(b_tmp))) {
+                r.rem = abs(b_tmp) - r.rem;
+                r.quot -= 1;
             }
         }
     } else if constexpr(signed_) {
@@ -1379,7 +1374,7 @@ template<std::size_t Size> using sized_int = std::conditional_t<
     compound_int<(Size + sizeof(full_int) - 1)/sizeof(full_int)>>;
 
 template<detail::small_sints T,detail::small_sints U> auto mul(const T &a,const U &b) noexcept {
-    return sized_int<std::max(sizeof(T),sizeof(U))>(a) * b;
+    return sized_int<sizeof(T) + sizeof(U)>(a) * b;
 }
 
 template<unsigned int N,bool Signed,comp_or_single_i T> auto operator/(const compound_xint<N,Signed> &a,const T &b) noexcept {

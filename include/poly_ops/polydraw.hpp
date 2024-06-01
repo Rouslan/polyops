@@ -1,7 +1,7 @@
 /* A very basic polygon rasterizer */
 
-#ifndef polydraw_hpp
-#define polydraw_hpp
+#ifndef POLY_OPS_POLYDRAW_HPP
+#define POLY_OPS_POLYDRAW_HPP
 
 #include <vector>
 #include <span>
@@ -11,6 +11,11 @@
 #include "base.hpp"
 #include "sweep_set.hpp"
 #include "large_ints.hpp"
+
+
+#ifndef POLY_OPS_DRAW_DEBUG_LOG
+#define POLY_OPS_DRAW_DEBUG_LOG(...) (void)0
+#endif
 
 namespace poly_ops::draw {
 
@@ -111,54 +116,11 @@ template<typename Coord> struct loop_point {
     }
 };
 
-struct segment_common {
-    std::size_t a;
-    std::size_t b;
+using segment = poly_ops::detail::segment<std::size_t>;
+template<typename Coord> using cached_segment = poly_ops::detail::cached_segment<std::size_t,Coord>;
 
-    segment_common() = default;
-    segment_common(std::size_t a,std::size_t b) noexcept : a{a}, b{b} {}
-    segment_common(const segment_common&) = default;
-
-    /* returns true if point 'a' comes before point 'b' in the loop */
-    template<typename T> bool a_is_main(const T &points) const {
-        assert(points[a].next == b || points[b].next == a);
-        return points[a].next == b;
-    }
-
-    friend bool operator==(const segment_common &a,const segment_common &b) {
-        return a.a == b.a && a.b == b.b;
-    }
-
-protected:
-    ~segment_common() = default;
-};
-
-struct segment : segment_common {
-    using segment_common::segment_common;
-
-    segment(const segment_common &s) noexcept : segment_common(s) {}
-
-    auto a_x(const auto &points) const { return points[this->a].data[0]; }
-    auto a_y(const auto &points) const { return points[this->a].data[1]; }
-    auto b_x(const auto &points) const { return points[this->b].data[0]; }
-    auto b_y(const auto &points) const { return points[this->b].data[1]; }
-};
-
-template<typename Coord> struct cached_segment : segment_common {
-    poly_ops::point_t<Coord> pa;
-    poly_ops::point_t<Coord> pb;
-
-    cached_segment() = default;
-    cached_segment(std::size_t a,std::size_t b,const poly_ops::point_t<Coord> &pa,const poly_ops::point_t<Coord> &pb)
-        noexcept(std::is_nothrow_copy_constructible_v<poly_ops::point_t<Coord>>)
-        : segment_common{a,b}, pa{pa}, pb{pb} {}
-    template<typename T> cached_segment(const segment_common &s,const T &points)
-        : segment_common{s}, pa{points[s.a].data}, pb{points[s.b].data} {}
-    template<typename T> cached_segment(std::size_t a,std::size_t b,const T &points)
-        : segment_common{a,b}, pa{points[a].data}, pb{points[b].data} {}
-    cached_segment(const cached_segment&) = default;
-    cached_segment &operator=(const cached_segment&) = default;
-};
+template<typename T> constexpr size_t compound_int_size
+    = (sizeof(T) + sizeof(large_ints::full_uint) - 1) / sizeof(large_ints::full_uint);
 
 template<typename Coord>
 bool intersects(
@@ -179,25 +141,31 @@ bool intersects(
 
     if(s1.a == s2.a || s1.a == s2.b || s1.b == s2.a || s1.b == s2.b) return false;
 
-    auto d = mul(x1-x2,y3-y4) - mul(y1-y2,x3-x4);
+    auto d = mul<Coord,Coord>(x1-x2,y3-y4) - mul<Coord,Coord>(y1-y2,x3-x4);
     if(d == 0) return false;
 
-    auto t_i = mul(x1-x3,y3-y4) - mul(y1-y3,x3-x4);
-    auto u_i = mul(x1-x3,y1-y2) - mul(y1-y3,x1-x2);
+    auto t_i = mul<Coord,Coord>(x1-x3,y3-y4) - mul<Coord,Coord>(y1-y3,x3-x4);
+    auto u_i = mul<Coord,Coord>(x1-x3,y1-y2) - mul<Coord,Coord>(y1-y3,x1-x2);
 
     if(d > 0) {
         if(t_i <= 0 || t_i >= d || u_i <= 0 || u_i >= d) return false;
     } else if(t_i >= 0 || t_i <= d || u_i >= 0 || u_i <= d) return false;
 
-    auto qr = unmul<1>(mul(t_i,y2-y1) + mul(d,y1),d,modulo_t::euclid);
-    intr_y = {static_cast<Coord>(qr.quot),{static_cast<Coord>(qr.rem),abs(d)}};
+    auto qr = unmul<compound_int_size<Coord>>(mul(t_i,y2-y1) + mul(d,y1),d,modulo_t::euclid);
+    intr_y.whole = static_cast<Coord>(qr.quot);
+    intr_y.frac.num = static_cast<typename fraction<Coord,2>::numerator_t>(qr.rem);
+    intr_y.frac.denom = abs(d);
 
     return true;
 }
 
-template<typename T> fraction<T,2,1> x_intercept(const poly_ops::point_t<T> &start,const poly_ops::point_t<T> &end,T y) noexcept {
+template<typename T> fraction<T,2,1> x_intercept(
+    const poly_ops::point_t<T> &start,
+    const poly_ops::point_t<T> &end,
+    std::type_identity_t<T> y) noexcept
+{
     using namespace large_ints;
-    return {mul(start.x(),y - end.y()) + mul(end.x(),start.y() - y),
+    return {mul<T,T>(start.x(),y - end.y()) + mul<T,T>(end.x(),start.y() - y),
         start.y() - end.y()};
 }
 
@@ -232,17 +200,17 @@ bool consistent_order(const sweep_t<Coord> &sweep) {
         auto itr_b = sweep.begin();
         for(; itr_b != itr_a; ++itr_b) {
             if(cmp(*itr_a,*itr_b)) {
-                assert(false);
+                POLY_OPS_ASSERT(false);
                 return false;
             }
         }
         if(cmp(*itr_a,*itr_b++)) {
-            assert(false);
+            POLY_OPS_ASSERT(false);
             return false;
         }
         for(; itr_b != sweep.end(); ++itr_b) {
             if(cmp(*itr_b,*itr_a)) {
-                assert(false);
+                POLY_OPS_ASSERT(false);
                 return false;
             }
         }
@@ -254,7 +222,10 @@ enum class event_type_t {backward,forward,swap};
 struct swap_type {};
 template<typename Coord> struct event {
     event_type_t type;
+
+    /* if type == event_type_t::swap, ab.a must be less than or equal to ab.b */
     segment ab;
+
     union {
         std::size_t sweep_node;
 
@@ -327,7 +298,7 @@ template<typename Coord> class events_t {
     std::size_t last_size;
 
     void incorporate_new() {
-        assert(events.size());
+        POLY_OPS_ASSERT(events.size());
 
         std::size_t new_count = events.size() - last_size;
         for(std::size_t i=new_count, j=events.size()-1; i>0; --i) {
@@ -358,7 +329,7 @@ public:
     }
 
     void next(points_ref points) {
-        assert(current_i < static_cast<std::ptrdiff_t>(events.size()));
+        POLY_OPS_ASSERT(current_i < static_cast<std::ptrdiff_t>(events.size()));
 
         if(events.size() > last_size) {
             if(last_size == 0) {
@@ -375,11 +346,11 @@ public:
                         events.begin()+static_cast<std::ptrdiff_t>(last_size),
                         events[last_size+i],
                         cmp{points});
-                    assert(itr == (events.begin()+static_cast<std::ptrdiff_t>(last_size)) || events[last_size+i] != *itr || itr->type == event_type_t::swap);
+                    POLY_OPS_ASSERT(itr == (events.begin()+static_cast<std::ptrdiff_t>(last_size))
+                        || events[last_size+i] != *itr
+                        || itr->type == event_type_t::swap);
 
-                    if(itr == (events.begin()+static_cast<std::ptrdiff_t>(last_size)) || events[last_size+i] != *itr) {
-                        new_events.emplace_back(std::move(events[last_size+i]),static_cast<std::size_t>(itr - events.begin()));
-                    }
+                    new_events.emplace_back(std::move(events[last_size+i]),static_cast<std::size_t>(itr - events.begin()));
                 }
                 events.resize(last_size + new_events.size());
 
@@ -392,7 +363,7 @@ public:
                         });
                     for(std::size_t i=0; i<new_events.size(); ++i) new_events[i].i += i;
 
-                    assert(static_cast<std::ptrdiff_t>(new_events[0].i) > current_i);
+                    POLY_OPS_ASSERT(static_cast<std::ptrdiff_t>(new_events[0].i) > current_i);
 
                     incorporate_new();
                 }
@@ -415,19 +386,24 @@ public:
         events.emplace_back(swap_type{},segment{sa,sb},intr_y);
     }
 
+    // this is only used for debugging
+    bool check_last_event(points_ref points) const {
+        return cmp{points}(current(),events.back());
+    }
+
     event<Coord> &current() { return events[static_cast<std::size_t>(current_i)]; }
     const event<Coord> &current() const { return events[static_cast<std::size_t>(current_i)]; }
 };
 
 template<typename T> T clamp(T x,std::type_identity_t<T> lo,std::type_identity_t<T> hi) {
-    assert(lo <= hi);
+    POLY_OPS_ASSERT(lo <= hi);
     if(x < lo) x = lo;
     else if(x > hi) x = hi;
     return x;
 }
 
 template<typename T,unsigned int NumSize,unsigned int DenomSize> T to_coord(const fraction<T,NumSize,DenomSize> &x,std::type_identity_t<T> lo,std::type_identity_t<T> hi) {
-    return clamp(static_cast<T>(large_ints::unmul<1>(x.num,x.denom).quot),lo,hi);
+    return clamp(static_cast<T>(large_ints::unmul<compound_int_size<T>>(x.num,x.denom).quot),lo,hi);
 }
 
 bool should_fill(fill_rule_t rule,long winding) {
@@ -441,7 +417,7 @@ bool should_fill(fill_rule_t rule,long winding) {
     case fill_rule_t::negative:
         return winding < 0;
     }
-    assert(false);
+    POLY_OPS_ASSERT(false);
     return false;
 }
 
@@ -462,13 +438,20 @@ template<typename Coord> class rasterizer {
 
     bool ran;
 
-    void check_intersection(std::size_t s1,std::size_t s2);
+    void check_intersection(std::size_t s1,std::size_t s2,Coord y);
+    void check_intersection_after_swap(
+        detail::sweep_t<Coord> sweep,
+        std::size_t s1,
+        std::size_t s2,
+        const detail::whole_and_frac<Coord,2> &y);
     void add_fb_events(std::size_t sa,std::size_t sb);
 
     template<poly_ops::point_range<Coord> R> void _add_loop(R &&loop) {
         auto sink = add_loop();
         for(poly_ops::point_t<Coord> p : loop) sink(p);
     }
+
+    void swap_and_check(detail::sweep_t<Coord> sweep,std::size_t s1,std::size_t s2,const detail::whole_and_frac<Coord,2> &y);
 
 public:
     class point_sink {
@@ -564,11 +547,61 @@ void rasterizer<Coord>::add_fb_events(std::size_t sa,std::size_t sb) {
 }
 
 template<typename Coord>
-void rasterizer<Coord>::check_intersection(std::size_t s1,std::size_t s2) {
+void rasterizer<Coord>::check_intersection(std::size_t s1,std::size_t s2,Coord y) {
     detail::whole_and_frac<Coord,2> intr_y;
-    if(intersects(sweep_nodes[s1].value,sweep_nodes[s2].value,intr_y)) {
-        events.add_swap_event(std::min(s1,s2),std::max(s1,s2),intr_y);
+    if(intersects(sweep_nodes[s1].value,sweep_nodes[s2].value,intr_y) && intr_y >= y) {
+        POLY_OPS_DRAW_DEBUG_LOG("checking intersection of {} and {}: {}",sweep_nodes[s1].value,sweep_nodes[s2].value,intr_y);
+        events.add_swap_event(s1,s2,intr_y);
+        POLY_OPS_ASSERT(events.check_last_event(lpoints));
+    } else {
+        POLY_OPS_DRAW_DEBUG_LOG("checking intersection of {} and {}: none",sweep_nodes[s1].value,sweep_nodes[s2].value);
     }
+}
+
+/* When lines are coincident, intersecting lines will have to swap with all the
+coincident lines */
+template<typename Coord>
+void rasterizer<Coord>::check_intersection_after_swap(
+    detail::sweep_t<Coord> sweep,
+    std::size_t s1,
+    std::size_t s2,
+    const detail::whole_and_frac<Coord,2> &y)
+{
+    detail::whole_and_frac<Coord,2> intr_y;
+    if(intersects(sweep_nodes[s1].value,sweep_nodes[s2].value,intr_y) && intr_y >= y) {
+        POLY_OPS_DRAW_DEBUG_LOG("checking intersection of {} and {}: {}",sweep_nodes[s1].value,sweep_nodes[s2].value,intr_y);
+        if(intr_y == y) {
+            POLY_OPS_DRAW_DEBUG_LOG(
+                "IMMEDIATE SWAP {} and {}",
+                sweep_nodes[s1].value,
+                sweep_nodes[s2].value);
+            
+            swap_and_check(sweep,s1,s2,y);
+        } else {
+            events.add_swap_event(s1,s2,intr_y);
+            POLY_OPS_ASSERT(events.check_last_event(lpoints));
+        }
+    } else {
+        POLY_OPS_DRAW_DEBUG_LOG("checking intersection of {} and {}: none",sweep_nodes[s1].value,sweep_nodes[s2].value);
+    }
+}
+
+template<typename Coord> void rasterizer<Coord>::swap_and_check(
+    detail::sweep_t<Coord> sweep,
+    std::size_t s1,
+    std::size_t s2,
+    const detail::whole_and_frac<Coord,2> &y)
+{
+    if(std::next(sweep.iterator_to(s1)) != sweep.iterator_to(s2)) return;
+
+    sweep.erase(s2);
+    sweep.insert_before(s1,s2);
+
+    auto itr1 = sweep.iterator_to(s2);
+    if(itr1 != sweep.begin()) check_intersection_after_swap(sweep,std::prev(itr1).index(),s2,y);
+    itr1 = sweep.iterator_to(s1);
+    auto itr2 = std::next(itr1);
+    if(itr2 != sweep.end()) check_intersection_after_swap(sweep,s1,itr2.index(),y);
 }
 
 struct scan_line {
@@ -601,51 +634,59 @@ public:
         }
 
         for(; !rast.events.at_end() && std::cmp_less(y,height); ++y) {
-            for(; !rast.events.at_end() && less_than_or_equal(rast.lpoints,rast.events.current(),y) && rast.events.current().type == event_type_t::swap; rast.events.next(rast.lpoints)) {
+            sweep.key_comp().current_y = y;
+            for(; !rast.events.at_end()
+                    && less_than_or_equal(rast.lpoints,rast.events.current(),y)
+                    && rast.events.current().type == event_type_t::swap; rast.events.next(rast.lpoints))
+            {
                 auto &e = rast.events.current();
 
-                auto a = e.ab.a;
-                auto b = e.ab.b;
-                if(std::next(sweep.iterator_to(a)) != sweep.iterator_to(b)) std::swap(a,b);
-                assert(std::next(sweep.iterator_to(a)) == sweep.iterator_to(b));
-                sweep.erase(b);
-                sweep.insert_before(a,b);
+                POLY_OPS_DRAW_DEBUG_LOG(
+                    "SWAP {} and {} at {}",
+                    rast.sweep_nodes[e.ab.a].value,
+                    rast.sweep_nodes[e.ab.b].value,
+                    e.intr_y);
 
-                auto itr1 = sweep.iterator_to(b);
-                if(itr1 != sweep.begin()) rast.check_intersection(std::prev(itr1).index(),b);
-                itr1 = sweep.iterator_to(a);
-                auto itr2 = std::next(itr1);
-                if(itr2 != sweep.end()) rast.check_intersection(a,itr2.index());
+                rast.swap_and_check(sweep,e.ab.a,e.ab.b,e.intr_y);
+
+                POLY_OPS_DRAW_DEBUG_LOG("sweep: {}",sweep);
             }
             for(; !rast.events.at_end() && less_than_or_equal(rast.lpoints,rast.events.current(),y) && rast.events.current().type == event_type_t::backward; rast.events.next(rast.lpoints)) {
                 auto &e = rast.events.current();
 
+                POLY_OPS_DRAW_DEBUG_LOG(
+                    "BACKWARD {} at {}",
+                    e.ab,
+                    e.ab.a_y(rast.lpoints));
+
                 auto itr = sweep.erase(e.sweep_node);
 
                 if(itr != sweep.end() && itr != sweep.begin()) {
-                    rast.check_intersection(std::prev(itr).index(),itr.index());
+                    rast.check_intersection(std::prev(itr).index(),itr.index(),e.ab.a_y(rast.lpoints));
                 }
+
+                POLY_OPS_DRAW_DEBUG_LOG("sweep: {}",sweep);
             }
-            /* Only now is the y coordinate of the comparison functor updated.
-            This is because for lines in 'sweep' where the x-intercept is the
-            same, the x-intercept of a line one unit lower is compared to
-            determine the order. Using this criteria, the order of lines change
-            when intersections are passed, thus intersections, including the
-            ones at end-points, must be processed before advancing. */
-            sweep.key_comp().current_y = y;
             for(; !rast.events.at_end() && less_than_or_equal(rast.lpoints,rast.events.current(),y) && rast.events.current().type == event_type_t::forward; rast.events.next(rast.lpoints)) {
                 auto &e = rast.events.current();
 
-                auto [itr,inserted] = sweep.insert(e.sweep_node);
-                assert(inserted);
+                POLY_OPS_DRAW_DEBUG_LOG(
+                    "FORWARD {} at {}",
+                    e.ab,
+                    e.ab.a_y(rast.lpoints));
 
-                if(itr != sweep.begin()) rast.check_intersection(std::prev(itr).index(),e.sweep_node);
+                auto [itr,inserted] = sweep.insert(e.sweep_node);
+                POLY_OPS_ASSERT(inserted);
+
+                if(itr != sweep.begin()) rast.check_intersection(std::prev(itr).index(),e.sweep_node,e.ab.a_y(rast.lpoints));
                 ++itr;
-                if(itr != sweep.end()) rast.check_intersection(e.sweep_node,itr.index());
+                if(itr != sweep.end()) rast.check_intersection(e.sweep_node,itr.index(),e.ab.a_y(rast.lpoints));
+
+                POLY_OPS_DRAW_DEBUG_LOG("sweep: {}",sweep);
             }
 
-            assert(rast.events.at_end() || !less_than_or_equal(rast.lpoints,rast.events.current(),y));
-            assert(consistent_order(sweep));
+            POLY_OPS_ASSERT(rast.events.at_end() || !less_than_or_equal(rast.lpoints,rast.events.current(),y));
+            POLY_OPS_ASSERT(consistent_order(sweep));
 
             if(y >= 0) {
                 winding = 0;
@@ -694,7 +735,7 @@ scan_line_sweep_state<Coord> rasterizer<Coord>::scan_lines(unsigned int width,un
 
     events.next(lpoints);
 
-    return {*this,width,height,events.at_end() ? 0 : events.current().ab.a_y(lpoints)};
+    return {*this,width,height,events.at_end() ? static_cast<Coord>(0) : events.current().ab.a_y(lpoints)};
 }
 
 template<typename Coord> template<typename F> 

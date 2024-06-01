@@ -12,7 +12,7 @@
 #include <span>
 
 
-#define POLY_OPS_ASSERT(X) if(!(X)) throw assertion_failure{#X}
+#define POLY_OPS_ASSERT(X) if(!(X)) throw assertion_failure{#X,__FILE__,__LINE__}
 #define POLY_OPS_ASSERT_SLOW POLY_OPS_ASSERT
 
 #define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F
@@ -28,6 +28,8 @@
     throw timed_out{}; \
 }
 
+constexpr unsigned int COORD_MAX = 1000;
+
 struct test_failure : std::exception {
     virtual std::ostream &emit(std::ostream &os) const = 0;
     const char *what() const noexcept override {
@@ -36,10 +38,13 @@ struct test_failure : std::exception {
 };
 struct assertion_failure : test_failure {
     const char *assertion_str;
-    explicit assertion_failure(const char *assertion) : assertion_str(assertion) {}
+    const char *filename;
+    int lineno;
+    assertion_failure(const char *assertion,const char *filename,int lineno)
+        : assertion_str{assertion}, filename{filename}, lineno{lineno} {}
 
     std::ostream &emit(std::ostream &os) const override {
-        return os << "assertion failure: " << assertion_str;
+        return os << "assertion failure at " << filename << " on line " << lineno << ": " << assertion_str;
     }
 };
 struct timed_out : test_failure {
@@ -55,28 +60,31 @@ bool timeout = false;
 std::chrono::steady_clock::time_point timeout_expiry;
 
 #include "../include/poly_ops/poly_ops.hpp"
+#include "../include/poly_ops/polydraw.hpp"
 #include "stream_output.hpp"
 
 
 constexpr long DEFAULT_LOOP_SIZE = 5;
+constexpr long DEFAULT_LOOP_COUNT = 1;
 constexpr long DEFAULT_TEST_COUNT = 1000000;
 
 
-enum class op_type {unset,normalize,offset,union_,all};
+enum class op_type {unset,normalize,offset,union_,all,draw};
 struct settings_t {
     op_type operation;
     long loop_size;
+    long loop_count;
     long timeout;
     long test_count;
     std::unique_ptr<char[]> failout;
     std::unique_ptr<char[]> datain;
 
-    settings_t() : operation(op_type::unset), loop_size(-1), timeout(-1), test_count(-1) {}
+    settings_t() : operation(op_type::unset), loop_size(-1), loop_count(-1), timeout(-1), test_count(-1) {}
 };
 
 template<typename Coord,typename Index>
 void random_loop(std::mt19937 &rand_gen,std::vector<poly_ops::point_t<Coord>> &loop,Index size) {
-    std::uniform_int_distribution<Coord> dist(0,1000);
+    std::uniform_int_distribution<Coord> dist(0,COORD_MAX);
     loop.resize(static_cast<std::size_t>(size));
     for(Index i=0; i<size; ++i) loop[i] = {dist(rand_gen),dist(rand_gen)};
 }
@@ -92,6 +100,14 @@ void do_one(op_type type,std::span<const std::vector<poly_ops::point_t<Coord>>> 
     }
     if(all || type == op_type::offset) {
         poly_ops::offset<false,Coord,Index>(loops,50,40);
+    }
+    if(type == op_type::draw) {
+        poly_ops::draw::rasterizer<Coord> rast;
+        rast.add_loops(loops);
+        rast.draw(
+            COORD_MAX,
+            COORD_MAX,
+            [](unsigned int,unsigned int,unsigned int){});
     }
 }
 
@@ -112,12 +128,15 @@ OPTIONS:
     Show this message.
 
 -o OPERATION
-    Operation to perform. This can be either "normalize", "offset", "union" or
-    "all". The default is "all".
+    Operation to perform. This can be either "normalize", "offset", "union",
+    "all" or "draw". The default is "all".
+    
+    "draw" is a special case. Instead of poly_ops::clipper,
+    poly_ops::draw::rasterizer is tested. "all" does not include "draw".
 
 -p INTEGER
-    A positive integer specifying how many points to generate for random tests.
-    The default is 5. This is ignored if "-d" is specified.
+    A positive integer specifying how many points per loop to generate for
+    random tests. The default is 5. This is ignored if "-d" is specified.
 
 -t INTEGER
     A positive integer specifying a time limit per test in milliseconds, or 0
@@ -125,8 +144,12 @@ OPTIONS:
 
 -n INTEGER
     A positive integer specifying how many times to run the test for each
-    integer size. New data is randomly generated each time. The default is 1
-    million. This is ignored if "-d" is specified.
+    integer size (16, 32 and 64 bits). New data is randomly generated each
+    time. The default is 1 million. This is ignored if "-d" is specified.
+
+-l INTEGER
+    A positive integer specifying how many loops to generate for random tests.
+    The default is 1. This is ignored if "-d" is specified.
 )";
     return false;
 }
@@ -144,7 +167,7 @@ void copy_str_into(std::unique_ptr<char[]> &dest,const char *src) {
 }
 
 bool handle_pos_val(settings_t&,const char*) {
-    std::cerr << "random_shapes does not take any positional arguments\n\n";
+    std::cerr << "this program does not take any positional arguments\n\n";
     return show_help();
 }
 
@@ -200,6 +223,10 @@ bool handle_operation_val(settings_t &settings,char **(&argv),char **end) {
         settings.operation = op_type::all;
         return true;
     }
+    if(strcmp(val,"draw") == 0) {
+        settings.operation = op_type::draw;
+        return true;
+    }
 
     return parse_fail();
 }
@@ -240,6 +267,9 @@ bool parse_command_line(settings_t &settings,char **argv,char **end) {
                 break;
             case 't':
                 if(!handle_nonneg_int_val(settings.timeout,argv,end)) return false;
+                break;
+            case 'l':
+                if(!handle_nonneg_int_val(settings.loop_count,argv,end)) return false;
                 break;
             default:
                 std::cerr << "unknown option \"" << (*argv)[1] << "\"\n\n";
@@ -303,20 +333,24 @@ template<typename Coord> void write_fail_file(const settings_t &settings,std::sp
 }
 
 template<typename Coord,typename Index> int run_random(const settings_t &settings) {
-    std::vector<poly_ops::point_t<Coord>> loop;
+    std::vector<std::vector<poly_ops::point_t<Coord>>> loops;
+    loops.resize(static_cast<std::size_t>(settings.loop_count));
     long i=0;
     std::mt19937 rand_gen;
     
     try {
-        for(; i<settings.test_count; ++i) {
+        while(i<settings.test_count) {
+            for(std::size_t j=0; j<static_cast<std::size_t>(settings.loop_count); ++j) {
+                random_loop(rand_gen,loops[j],static_cast<Index>(settings.loop_size));
+            }
+            enable_timeout(settings);
+            do_one<Coord,Index>(settings.operation,loops);
+            ++i;
             if(i > 0 && i % 1000 == 0)
                 std::cout << "completed " << i << " tests\n";
-            random_loop(rand_gen,loop,static_cast<Index>(settings.loop_size));
-            enable_timeout(settings);
-            do_one<Coord,Index>(settings.operation,std::span(&loop,1));
         }
     } catch(const test_failure &e) {
-        write_fail_file<Coord>(settings,std::span{&loop,1});
+        write_fail_file<Coord>(settings,loops);
         std::cout << e << '\n';
         return 1;
     }
@@ -337,8 +371,10 @@ int main(int argc,char **argv) {
     if(argc < 1 || !parse_command_line(settings,argv+1,argv+argc)) return 1;
 
     if(settings.loop_size < 0) settings.loop_size = DEFAULT_LOOP_SIZE;
+    if(settings.loop_count < 0) settings.loop_count = DEFAULT_LOOP_COUNT;
     if(settings.timeout < 0) settings.timeout = 0;
     if(settings.test_count < 0) settings.test_count = DEFAULT_TEST_COUNT;
+    if(settings.operation == op_type::unset) settings.operation = op_type::all;
 
     if(int r=run_with_param<std::int16_t,std::uint16_t>(settings)) return r;
     if(int r=run_with_param<std::int32_t,std::uint32_t>(settings)) return r;

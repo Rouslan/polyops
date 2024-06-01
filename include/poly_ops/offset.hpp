@@ -101,6 +101,7 @@ void add_offset_point(
 {
     using real_t = real_coord_t<Coord>;
 
+    POLY_OPS_ASSERT(p1 != p2);
     point_t<real_t> offset = perp_vector<Coord>(p1,p2,magnitude);
 
     /* add a point for the new end of the previous line segment */
@@ -158,8 +159,9 @@ public:
         original_sets[to].merge(original_sets[from]);
     }
 
-    void point_move(Index p,Index to) override {
-        original_sets[p] = original_sets[to];
+    void point_copy_and_delete(Index to_copy,Index to_delete) override {
+        original_sets.emplace_back(std::move(original_sets[to_delete]));
+        original_sets.back() = original_sets[to_copy];
     }
 
     void points_removed(Index n) override {
@@ -189,47 +191,54 @@ void add_offset_loops(
     if constexpr(point_range_range<Input,Coord>) {
         for(auto &&loop: input) add_offset_loops(n,std::forward<decltype(loop)>(loop),set,magnitude,arc_step_size,pt);
     } else {
-        Index orig_i;
-        {
-            auto sink = n.add_loop(set,pt);
-            orig_i = sink.last_orig_i() + 1;
-            auto itr = std::ranges::begin(input);
-            auto end = std::ranges::end(input);
-            if(itr == end) return;
+        /* for each point added, we need to know the previous and next points,
+        thus the first point is added last, after the entire input iterator is
+        traversed */
 
-            point_t<Coord> prev2(*itr);
-            ++itr;
-            point_t<Coord> first = prev2;
+        auto sink = n.add_loop(set,pt);
+        Index orig_i = sink.last_orig_i() + 1;
+        auto itr = std::ranges::begin(input);
+        auto end = std::ranges::end(input);
+        if(itr == end) return;
 
+        point_t<Coord> prev2(*itr);
+        ++itr;
+        point_t<Coord> first = prev2;
+
+        point_t<Coord> prev1, second;
+        
+        do {
             if(itr == end) {
-                /* A size of one can be handled as a special case. The result is a
-                circle around the single point, but for now, we just ignore such
-                "loops". */
+                /* A size of one can be handled as a special case. The
+                result is a circle around the single point, but for now, we
+                just ignore such "loops". */
                 sink.last_orig_i() = orig_i;
                 return;
             }
 
-            point_t<Coord> prev1(*itr);
+            prev1 = second = *itr;
             ++itr;
-            point_t<Coord> second = prev1;
+            second = prev1;
+        } while(prev1 == prev2);
 
-            if(itr == end) {
-                detail::add_offset_point<Index,Coord>(sink,magnitude,arc_step_size,orig_i,orig_i+1,prev2,prev1,prev2);
-                detail::add_offset_point<Index,Coord>(sink,magnitude,arc_step_size,orig_i+1,orig_i,prev1,prev2,prev1);
-                return;
-            }
-
-            Index orig_i1 = orig_i;
-            for(point_t<Coord> p : std::ranges::subrange(itr,end)) {
+        Index orig_i1 = orig_i;
+        for(point_t<Coord> p : std::ranges::subrange(itr,end)) {
+            if(p != prev1) {
                 detail::add_offset_point<Index,Coord>(sink,magnitude,arc_step_size,orig_i,orig_i+1,prev2,prev1,p);
                 prev2 = prev1;
                 prev1 = p;
-                ++orig_i;
             }
+            ++orig_i;
+        }
+        if(prev2 != prev1) {
             detail::add_offset_point<Index,Coord>(sink,magnitude,arc_step_size,orig_i,orig_i+1,prev2,prev1,first);
+        }
+        ++orig_i;
+
+        if(prev1 != first) {
             detail::add_offset_point<Index,Coord>(sink,magnitude,arc_step_size,orig_i+1,orig_i1,prev1,first,second);
         }
-        n.last_orig_i() = orig_i + 1;
+        sink.last_orig_i() = orig_i;
     }
 }
 

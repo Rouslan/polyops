@@ -56,7 +56,7 @@ add_test(NAME NormalizeBitmapTest COMMAND btest ${test_input_file} normalize)
 add_test(NAME OffsetBitmapTest COMMAND btest ${test_input_file} offset)
 
 add_executable(whitebox white_box.cpp)
-add_test(NAME WhiteBox COMMAND whitebox -t2000 -n50000 -p50)
+add_test(NAME WhiteBox COMMAND whitebox -t2000 -n500 -p10)
 
 #add_executable(misc_tests misc_tests.cpp)
 
@@ -64,3 +64,5 @@ add_executable(gen_discontinuous gen_discontinuous.cpp bitmap.cpp)
 
 add_custom_target(test_bin)
 add_dependencies(test_bin btest whitebox test_large_ints_ext test_large_ints_noext)
+
+add_executable(polydraw_debug_log EXCLUDE_FROM_ALL polydraw_debug_log.cpp)

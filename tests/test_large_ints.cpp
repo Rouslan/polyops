@@ -100,7 +100,7 @@ template<unsigned int N> std::vector<compound_int_pair<N>> gen_random_compound_i
         return x;
     };
 
-    std::vector<std::pair<compound_int<4>,compound_int<4>>> test_input;
+    std::vector<std::pair<compound_int<N>,compound_int<N>>> test_input;
     test_input.reserve(test_run_count);
     for(int i=0; i<test_run_count; ++i) {
         test_input.emplace_back(rand_compound_int(),rand_compound_int());
@@ -215,6 +215,10 @@ int main() {
         expect(boost::ut::eq(unmul<1>(27,-10,modulo_t::euclid).rem, 3));
         expect(boost::ut::eq(unmul<1>(-27,10,modulo_t::euclid).rem, 3));
         expect(boost::ut::eq(unmul<1>(-27,-10,modulo_t::euclid).rem, 7));
+        expect(boost::ut::eq(unmul<1>(compound_int<2>(27),10,modulo_t::euclid).rem, 7));
+        expect(boost::ut::eq(unmul<1>(compound_int<2>(27),-10,modulo_t::euclid).rem, 3));
+        expect(boost::ut::eq(unmul<1>(compound_int<2>(-27),10,modulo_t::euclid).rem, 3));
+        expect(boost::ut::eq(unmul<1>(compound_int<2>(-27),-10,modulo_t::euclid).rem, 7));
     };
 
 #ifdef HAVE_GMP_LIBRARY

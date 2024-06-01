@@ -104,10 +104,17 @@ class SweepSetPrinter:
         self.val = val
 
     def __iter__(self):
-        return enumerate(sweep_set_iter(self.val))
+        return sweep_set_iter(self.val)
+    
+    def children(self):
+        for i,val in enumerate(self):
+            yield str(i),val
+
+    def display_hint(self):
+        return 'array'
 
     def to_string(self):
-        return '{%s}' % ','.join(map(str,sweep_set_iter(self.val)))
+        return 'sweep_set instance'
 
 class SegmentPrinter:
     """Print a poly_ops::detail::segment instance"""
@@ -134,7 +141,7 @@ class CachedSegmentPrinter:
             int(pb[1]))
 
 class CompoundIntPrinter:
-    """Print a poly_ops_new::compound_xint instance"""
+    """Print a poly_ops::large_ints::compound_xint instance"""
     def __init__(self,val):
         self.val = val
     
@@ -151,11 +158,40 @@ class CompoundIntPrinter:
             value = -((1 << (wsize*8*wcount)) - value)
         return str(value)
 
+class DrawEventPrinter:
+    """Print a poly_ops::draw::detail::event instance"""
+    def __init__(self,val):
+        self.val = val
+    
+    def to_string(self):
+        try:
+            type = self.val['type']
+            event_ns = 'poly_ops::draw::detail::event_type_t::'
+            ab = self.val['ab']
+            a = int(ab['a'])
+            b = int(ab['b'])
+            swap_sym = gdb.lookup_global_symbol(event_ns + 'swap')
+            if swap_sym is None:
+                return 'error: cannot find "{event_ns}swap"'
+            if type == swap_sym.value():
+                y_intr = self.val['intr_y']
+                return f'swap sweep nodes {a} and {b} at {y_intr}'
+            else:
+                forward_sym = gdb.lookup_global_symbol(event_ns + 'forward')
+                if forward_sym is None:
+                    return 'error: cannot find "{event_ns}forward"'
+                t_str = 'forward' if type == forward_sym.value() else 'backward'
+                sn = int(self.val['sweep_node'])
+                return f'{t_str} line {a} - {b}, sweep_node {sn}'
+        except Exception as e:
+            return str(e)
+
 def build_pretty_printer():
     pp = gdb.printing.RegexpCollectionPrettyPrinter('polyops')
     pp.add_printer('point_t','^poly_ops::point_t<.*>$',PointPrinter)
     pp.add_printer('sweep_set','^poly_ops::detail::sweep_set<.*>$',SweepSetPrinter)
-    pp.add_printer('segment','^poly(_ops|draw)::detail::segment(<.*>)?$',SegmentPrinter)
-    pp.add_printer('cached_segment','^poly(_ops|draw)::detail::cached_segment<.*>$',CachedSegmentPrinter)
-    pp.add_printer('compound_xint','^poly_ops_new::compound_xint<.*>$',CompoundIntPrinter)
+    pp.add_printer('segment','^poly_ops(::draw)?::detail::segment(<.*>)?$',SegmentPrinter)
+    pp.add_printer('cached_segment','^poly_ops(::draw)?::detail::cached_segment<.*>$',CachedSegmentPrinter)
+    pp.add_printer('compound_xint','^poly_ops::large_ints::compound_xint<.*>$',CompoundIntPrinter)
+    pp.add_printer('draw_event','^poly_ops::draw::detail::event<.*>$',DrawEventPrinter)
     return pp

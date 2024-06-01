@@ -1,6 +1,5 @@
-/* This code was copied and pasted from the Boost intrusive library, then
-modified to remove some of unneeded stuff. The original copyright notice is as
-follows: */
+/* This code was copied from the Boost intrusive library, then modified to
+remove some unneeded stuff. The original copyright notice is as follows: */
 
 /////////////////////////////////////////////////////////////////////////////
 //

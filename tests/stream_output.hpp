@@ -9,6 +9,14 @@ poly_ops.hpp is always "coord_t" and Index is always "index_t".
 #include <istream>
 #include <ostream>
 #include <type_traits>
+#include <map>
+#include <string_view>
+#include <ranges>
+
+#if __has_include (<format>)
+#include <format>
+#define POLY_OPS_HAS_STD_FORMAT
+#endif
 
 #include "../include/poly_ops/base.hpp"
 
@@ -113,12 +121,12 @@ template<typename... T> struct pp_printer<std::tuple<T...>> {
 
 template<typename T> struct delimited_t {
     T items;
-    const char *delimiter;
+    std::string_view delimiter;
 
-    explicit delimited_t(T &&items,const char *delimiter=",")
+    explicit constexpr delimited_t(T &&items,std::string_view delimiter=", ")
         : items(std::forward<T>(items)), delimiter(delimiter) {}
 };
-template<typename R> delimited_t<R> delimited(R &&items) {
+template<typename R> constexpr delimited_t<R> delimited(R &&items) {
     return delimited_t<R>{std::forward<R>(items)};
 }
 template<typename T> std::ostream &operator<<(std::ostream &os,delimited_t<T> &&d) {
@@ -174,12 +182,6 @@ template<typename T,typename Alloc> struct pp_printer<std::vector<T,Alloc>> {
     }
 };
 
-template<typename Index> struct pp_printer<poly_ops::detail::broken_starts_stack<Index>> {
-    void operator()(std::ostream &os,indent_t indent,const poly_ops::detail::broken_starts_stack<Index> &bsstack) const {
-        os << pp(bsstack.items,indent);
-    }
-};
-
 template<typename T> std::ostream &operator<<(std::ostream &os,const _pp<T> &x) {
     pp_printer<std::remove_cvref_t<T>>{}(os,indent_t{x.indent},x.value);
     return os;
@@ -229,7 +231,7 @@ template<typename Coord> void read_loops(std::istream &is,std::vector<std::vecto
         if(c == '=') {
             if(c_count) odd_coord_count();
             is.get();
-            loops.emplace_back();
+            if(!loops.back().empty()) loops.emplace_back();
         } else {
             is >> p[c_count++];
             if(c_count > 1) {
@@ -239,5 +241,138 @@ template<typename Coord> void read_loops(std::istream &is,std::vector<std::vecto
         }
     }
 }
+
+#ifdef POLY_OPS_HAS_STD_FORMAT
+
+#include "../include/poly_ops/sweep_set.hpp"
+
+template<typename Index> struct segment_common_formatter {
+    template<typename ParseContext>
+    constexpr ParseContext::iterator parse(ParseContext &ctx) const {
+        return ctx.begin();
+    }
+    template<typename FmtContext>
+    FmtContext::iterator format(const poly_ops::detail::segment_common<Index> &s,FmtContext &ctx) const {
+        return std::format_to(ctx.out(),"{} - {}",s.a,s.b);
+    }
+};
+
+template<typename Index>
+struct std::formatter<poly_ops::detail::segment<Index>,char> : segment_common_formatter<Index> {};
+template<typename Index,typename Coord>
+struct std::formatter<poly_ops::detail::cached_segment<Index,Coord>,char> : segment_common_formatter<Index> {};
+
+/* a poor man's substitute for C++23 range formatting */
+template<typename R>
+struct std::formatter<delimited_t<R>,char> {
+    template<typename ParseContext>
+    constexpr ParseContext::iterator parse(ParseContext &ctx) const {
+        return ctx.begin();
+    }
+    template<typename FmtContext>
+    FmtContext::iterator format(const delimited_t<R> &d,FmtContext &ctx) const {
+        auto out = ctx.out();
+        bool started = false;
+        for(auto &&item : d.items) {
+            if(started) {
+                out = std::format_to(out,"{}",d.delimiter);
+            }
+            out = std::format_to(out,"{}",item);
+            started = true;
+        }
+        return out;
+    }
+};
+
+template<typename T,typename Index,typename Compare,typename Vec>
+struct std::formatter<poly_ops::detail::sweep_set<T,Index,Compare,Vec>,char> {
+    template<typename ParseContext>
+    constexpr ParseContext::iterator parse(ParseContext &ctx) const {
+        return ctx.begin();
+    }
+    template<typename FmtContext>
+    FmtContext::iterator format(const poly_ops::detail::sweep_set<T,Index,Compare,Vec> &s,FmtContext &ctx) const {
+        return std::format_to(
+            ctx.out(),
+            "{{{}}}",
+            delimited(s | std::views::transform([](const auto &node) -> decltype(auto) { return node.value; })));
+    }
+};
+
+namespace detail {
+template<unsigned int N>
+int format_large_int(poly_ops::large_ints::compound_uint<N> x,char *buffer) {
+    int digits = 0;
+    while(x != 0) {
+        auto dm = poly_ops::large_ints::divmod(x,10u);
+        x = dm.quot;
+        buffer[digits++] = "0123456789"[static_cast<unsigned int>(dm.rem)];
+    }
+    if(digits == 0) {
+        *buffer = '0';
+        digits = 1;
+    }
+    return digits;
+}
+}
+
+template<unsigned int N,bool Signed>
+struct std::formatter<poly_ops::large_ints::compound_xint<N,Signed>,char> {
+    template<typename ParseContext>
+    constexpr ParseContext::iterator parse(ParseContext &ctx) const {
+        return ctx.begin();
+    }
+    template<typename FmtContext>
+    FmtContext::iterator format(const poly_ops::large_ints::compound_xint<N,Signed> &x,FmtContext &ctx) const {
+        char buffer[(N*sizeof(poly_ops::large_ints::full_uint)*8 + 2) / 3];
+        int digits;
+        auto out = ctx.out();
+
+        if constexpr(Signed) {
+            if(x.negative()) {
+                *out++ = '-';
+                digits = detail::format_large_int(static_cast<poly_ops::large_ints::compound_uint<N>>(-x),buffer);
+            } else {
+                digits = detail::format_large_int(static_cast<poly_ops::large_ints::compound_uint<N>>(x),buffer);
+            }
+        } else {
+            digits = detail::format_large_int(x,buffer);
+        }
+
+        while(digits--) {
+            *out++ = buffer[digits];
+        }
+
+        return out;
+    }
+};
+
+#ifdef POLY_OPS_POLYDRAW_HPP
+template<typename T,unsigned int SizeNum,unsigned int SizeDenom>
+struct std::formatter<poly_ops::draw::detail::fraction<T,SizeNum,SizeDenom>,char> {
+    template<typename ParseContext>
+    constexpr ParseContext::iterator parse(ParseContext &ctx) const {
+        return ctx.begin();
+    }
+    template<typename FmtContext>
+    FmtContext::iterator format(const poly_ops::draw::detail::fraction<T,SizeNum,SizeDenom> &f,FmtContext &ctx) const {
+        return std::format_to(ctx.out(),"{}/{}",f.num,f.denom);
+    }
+};
+
+template<typename T,unsigned int Size>
+struct std::formatter<poly_ops::draw::detail::whole_and_frac<T,Size>,char> {
+    template<typename ParseContext>
+    constexpr ParseContext::iterator parse(ParseContext &ctx) const {
+        return ctx.begin();
+    }
+    template<typename FmtContext>
+    FmtContext::iterator format(const poly_ops::draw::detail::whole_and_frac<T,Size> &f,FmtContext &ctx) const {
+        return std::format_to(ctx.out(),"{} + {}",f.whole,f.frac);
+    }
+};
+#endif
+
+#endif
 
 #endif

@@ -1,4 +1,4 @@
-Copyright 2022-2023 Rouslan Korneychuk
+Copyright 2022-2024 Rouslan Korneychuk
 
 Permission is hereby granted, free of charge, to any person or organization
 obtaining a copy of the software and accompanying documentation covered by

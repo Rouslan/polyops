@@ -33,4 +33,5 @@ cpp_maximum_signature_line_length = 120
 
 breathe_default_project = 'polyops'
 breathe_show_include = False
+breathe_use_cpp_namespace = True
 
