@@ -12,7 +12,6 @@
 
 #include "../include/poly_ops/large_ints.hpp"
 
-using namespace boost::ut;
 
 #ifdef HAVE_GMP_LIBRARY
 template<unsigned int N,bool Signed> mpz_class to_gmp(const poly_ops::large_ints::compound_xint<N,Signed> &x) {
@@ -180,6 +179,8 @@ int main() {
         expect(boost::ut::eq((0xfedcba9876543210fedcba9876543210_compi >> 0), 0xfedcba9876543210fedcba9876543210_compi));
         expect(boost::ut::eq((0xfedcba9876543210fedcba9876543210_compi << 0), 0xfedcba9876543210fedcba9876543210_compi));
         expect(boost::ut::eq((0x0000fedcba9876543210fedcba9876543210_compi << 13), 0x1fdb97530eca86421fdb97530eca86420000_compi));
+        expect(boost::ut::eq((0x000000000000000000fedcba9876543210fedcba9876543210_compi << 70), 0x3fb72ea61d950c843fb72ea61d950c84000000000000000000_compi));
+        expect(boost::ut::eq((0x121fa00ad77d742247acc9140513b74458fab20783af1222236d88fe5618cf0_compi >> 1), 0x90fd0056bbeba1123d6648a0289dba22c7d5903c1d7891111b6c47f2b0c678_compi));
     };
 
     "Test divide"_test = [] {

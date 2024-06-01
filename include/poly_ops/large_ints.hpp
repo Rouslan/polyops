@@ -1144,11 +1144,13 @@ auto unmul(const T &a,const U &b,modulo_t::type<Mod> = {}) noexcept {
     if constexpr(Nr == 1 && detail::int_count<Signed,T> == 2 && Nb == 1) {
 #  if _POLY_OPS_IMPL_HAVE_DIVX
         if constexpr(Signed) {
+            full_int rem;
             r.quot = _POLY_OPS_MSVC_DIV(
                 compi_hi<2,true>(a),
                 compi_hi<1,true>(a),
                 compi_hi<1,true>(b),
-                &static_cast<full_int&>(r.rem.hi()));
+                &rem);
+            r.rem = rem;
         } else {
             r.quot = _POLY_OPS_MSVC_UDIV(
                 compi_hi<2>(a),
@@ -1245,9 +1247,9 @@ namespace detail {
     }*/
 #endif
     template<unsigned int N> void udivmod_shift_sub(
-        full_uint *_POLY_OPS_RESTRICT a,
-        full_uint *_POLY_OPS_RESTRICT b,
-        full_uint *_POLY_OPS_RESTRICT quot) noexcept
+        full_uint * a,
+        full_uint * b,
+        full_uint * quot) noexcept
     {
         if constexpr(N > 1) {
             if(a[N-1] == 0 && b[N-1] == 0) {
@@ -1271,8 +1273,9 @@ namespace detail {
                     int end = static_cast<int>(n * sizeof(full_uint) * 8);
                     for(; shift >= end; --shift) {
                         quot[n] <<= 1;
-                        if(cmp(a_ref,b_ref) >= 0) {
-                            subborrow<N>(a_ref,b_ref);
+                        compound_uint<N> tmp = a_ref;
+                        if(!subborrow<N>(tmp,b_ref)) {
+                            a_ref.set(tmp);
                             quot[n] |= 1;
                         }
                         _shift_right<false,N>(b_ref,b_ref,1);

@@ -165,8 +165,8 @@ template<typename T> fraction<T,2,1> x_intercept(
     std::type_identity_t<T> y) noexcept
 {
     using namespace large_ints;
-    return {mul<T,T>(start.x(),y - end.y()) + mul<T,T>(end.x(),start.y() - y),
-        start.y() - end.y()};
+    return {mul(start.x(),static_cast<T>(y - end.y())) + mul(end.x(),static_cast<T>(start.y() - y)),
+        static_cast<T>(start.y() - end.y())};
 }
 
 template<typename Coord> struct sweep_cmp {

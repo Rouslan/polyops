@@ -12,6 +12,7 @@ poly_ops.hpp is always "coord_t" and Index is always "index_t".
 #include <map>
 #include <string_view>
 #include <ranges>
+#include <vector>
 
 #if __has_include (<format>)
 #include <format>
