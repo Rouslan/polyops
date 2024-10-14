@@ -9,9 +9,13 @@ MAX_PLOT_SIZE = 400
 
 PLOTTER = os.path.join(os.path.dirname(__file__),'plotter.py')
 
-def cpp_loop_val_to_py(x):
+def cpp_loop_val_to_py(x,line_state_t_names):
     data = x['data']['_data']
-    return {'p': (int(data[0]),int(data[1])), 'next': int(x['next'])}
+    return {
+        'p': (int(data[0]),int(data[1])),
+        'next': int(x['next']),
+        'state': line_state_t_names.get(x['aux']['desc']['state'],'<invalid>'),
+        'loop_i': int(x['aux']['loop_index'])}
 
 def vector_length_data(x):
     impl = x['_M_impl']
@@ -37,11 +41,17 @@ class Plotter(gdb.Command):
 
         if size > MAX_PLOT_SIZE: size = MAX_PLOT_SIZE
 
-        points = [cpp_loop_val_to_py(data[i]) for i in range(size)]
+        line_state_t_names = {}
+        for name in ('undef','check','discard','keep','keep_rev'):
+            val = gdb.lookup_global_symbol('poly_ops::detail::line_state_t::' + name)
+            line_state_t_names[val] = name
+
+        points = [cpp_loop_val_to_py(data[i],line_state_t_names) for i in range(size)]
 
         if self.proc is None or self.proc.poll() is not None:
             self.proc = subprocess.Popen([sys.executable,PLOTTER],stdin=subprocess.PIPE,text=True)
 
+        assert self.proc.stdin is not None
         json.dump(points,self.proc.stdin)
         self.proc.stdin.write('\n')
         self.proc.stdin.flush()

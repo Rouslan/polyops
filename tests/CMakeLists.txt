@@ -8,23 +8,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 set(THREADS_PREFER_PTHREAD_FLAG True)
 
 
-find_package(Boost 1.69.0)
-find_package(Threads)
-
-
 if (MSVC)
     add_compile_options(/W4)
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 else()
     add_compile_options(-Wall -Wextra -Wundef -Wconversion -Wsign-conversion -pedantic -fvisibility=hidden)
-endif()
-
-if(Boost_FOUND)
-    add_library(websocket_server SHARED server.cpp)
-    target_link_libraries(websocket_server PRIVATE Boost::boost PUBLIC Threads::Threads)
-
-    add_executable(random_shapes random_shapes.cpp)
-    target_link_libraries(random_shapes websocket_server)
 endif()
 
 find_package(PkgConfig)
@@ -58,11 +46,12 @@ add_test(NAME OffsetBitmapTest COMMAND btest ${test_input_file} offset)
 add_executable(whitebox white_box.cpp)
 add_test(NAME WhiteBox COMMAND whitebox -t2000 -n500 -p10)
 
-#add_executable(misc_tests misc_tests.cpp)
+add_executable(misc_tests misc_tests.cpp)
+add_test(NAME MiscTests COMMAND misc_tests)
 
 add_executable(gen_discontinuous gen_discontinuous.cpp bitmap.cpp)
 
 add_custom_target(test_bin)
-add_dependencies(test_bin btest whitebox test_large_ints_ext test_large_ints_noext)
+add_dependencies(test_bin btest whitebox test_large_ints_ext test_large_ints_noext misc_tests)
 
 add_executable(polydraw_debug_log EXCLUDE_FROM_ALL polydraw_debug_log.cpp)

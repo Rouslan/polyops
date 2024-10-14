@@ -297,15 +297,8 @@ enum class event_type_t {vforward,backward,forward,vbackward};
 /* "normal" is the default state.
 
 "deleted" is used instead of removing events from the array, to avoid spending
-time on moving elements backward.
-
-XXX: this is not yet implemented. "processed" means both the forward and
-backward events of a particular segment have been looked at. Line segments are
-broken as soon as intersections are found, thus by the time a segment is marked
-as "processed" (indirectly via its events), it is guaranteed not to intersect
-with any other segment. This allows us to skip rechecking intersections after
-back-tracking. */
-enum class event_status_t {normal,processed,deleted};
+time on moving elements backward. */
+enum class event_status_t {normal,deleted};
 
 template<typename Index> struct event {
     segment<Index> ab;
@@ -1157,10 +1150,47 @@ bool consistent_order(const sweep_t<Index,Coord> &sweep) {
     return true;
 }
 
-template<typename Index,typename Coord>
-using broken_starts_t = std::pmr::map<point_t<Coord>,std::pmr::vector<Index>,point_less>;
+template<typename Index> struct virt_point {
+    Index next;
+    bool next_is_end;
+};
 
-template<typename Index> using broken_ends_t = std::pmr::vector<Index>;
+/* After determining where lines cross, the segments are broken up, and later
+rejoined to other segments.
+
+broken_starts is a mapping of points to arrays of start points.
+
+broken_ends is a list of points before end-points. The end-points will need to
+be replaced with a start point that has the same coordinates.
+
+If a segment needs to be reversed, it will have an extra end point (formally the
+start) and a missing start point because the former end point is the start of
+another segment (or the same segment if the segment is the entire loop) and
+cannot be altered yet.
+  +------------------+       +------------------+
+  | S-->O-->O-->E--> |   =>  | S<->O<--O   E--> |
+  +------------------+       +------------------+
+Instead of moving any points, the extra end point is added to a list of
+"orphans" and the missing start point is recorded in virtual_points. After all
+segments are collected, the orphans are used to supply the missing points of
+other segments.
+ */
+template<typename Index,typename Coord> struct breaks_t {
+    std::pmr::map<point_t<Coord>,std::pmr::vector<Index>,point_less> broken_starts;
+    std::pmr::vector<Index> broken_ends;
+    std::pmr::map<point_t<Coord>,std::pmr::vector<virt_point<Index>>,point_less> virtual_points;
+    std::pmr::vector<Index> orphans;
+
+    breaks_t(std::pmr::memory_resource *contig_mem,std::pmr::memory_resource *discrete_mem)
+        : broken_starts(discrete_mem), broken_ends(contig_mem), virtual_points(discrete_mem), orphans(contig_mem) {}
+    
+    void clear() {
+        broken_starts.clear();
+        broken_ends.clear();
+        virtual_points.clear();
+        orphans.clear();
+    }
+};
 
 /* Follow the points connected to the point at "intr" until another intersection
 is reached or we wrapped around. Along the way, update the "state()" value to
@@ -1175,8 +1205,7 @@ template<typename Index,typename Coord>
 void follow_balance(
     std::pmr::vector<loop_point<Index,Coord>> &points,
     Index intr,
-    broken_ends_t<Index> &broken_ends,
-    broken_starts_t<Index,Coord> &broken_starts,
+    breaks_t<Index,Coord> &breaks,
     i_point_tracker<Index> *pt)
 {
     POLY_OPS_ASSERT(points[intr].has_line_bal());
@@ -1189,6 +1218,8 @@ void follow_balance(
         if(points[intr].state() == line_state_t::discard) {
             if(pt) pt->point_merge(prev,next);
         } else if(points[intr].state() == line_state_t::keep_rev) {
+            /* the actual points should not be moved, to make point-tracking
+            simpler */
             points[next].next = prev;
         }
 
@@ -1196,40 +1227,30 @@ void follow_balance(
         next = real_next_next;
     }
 
-    Index new_i;
+    bool next_is_end = false;
 
     switch(points[intr].state()) {
     case line_state_t::discard:
         if(pt) pt->point_merge(prev,next);
         break;
     case line_state_t::keep:
-        broken_starts[points[intr].data].push_back(intr);
-        broken_ends.push_back(prev);
+        breaks.broken_starts[points[intr].data].push_back(intr);
+        breaks.broken_ends.push_back(prev);
         break;
     case line_state_t::keep_rev:
-        /* Reversing the direction of the lines leaves us with a missing line at
-        the end (which is now the start) and an extra line at the start (now the
-        end). We need the old coordinates of the former start to serve as the
-        end-point of the prior point, so the prior line can be rejoined later,
-        but we also need the new coordinates of the new start to calculate line
-        angles later, thus a new point is made for the new start and the old
-        start is given the state of "discard". */
-        new_i = static_cast<Index>(points.size());
-        broken_starts[points[next].data].push_back(new_i);
-        points.push_back(points[next]);
-        points[intr].state() = line_state_t::discard;
-        points.back().next = prev;
-
-        /* it doesn't matter whether the state is "keep" or "keep_rev" at this
-        point */
-        points.back().state() = line_state_t::keep_rev;
+        breaks.orphans.push_back(intr);
 
         /* The new second-last point is the point after "intr". If the point
         after "intr" is the old last point, the second-last point is the new
         first point. */
-        broken_ends.push_back(prev == intr ? new_i : points[intr].next);
+        if(prev == intr) {
+            next_is_end = true;
+        } else {
+            breaks.broken_ends.push_back(points[intr].next);
+        }
 
-        if(pt) pt->point_copy_and_delete(next,intr);
+        breaks.virtual_points[points[next].data].emplace_back(prev,next_is_end);
+
         break;
     default:
         POLY_OPS_ASSERT(false);
@@ -1272,10 +1293,19 @@ void find_loops(
     }
 }
 
+/* Take an array of intr_t instances ("samples") where each "p" member refers to
+a point, and create a new array with the same data, except the "p" member refers
+to a loop. If the item doesn't refer to a loop, it's not included in the new
+array. The new array is then sorted by loop index and deduplicated, so that only
+the first item for a given loop index is kept.
+
+The "hits" array is moved, not copied to the corresponding intr_t instance in
+the new array, thus the items of "samples" cannot be use after this function is
+called. */
 template<typename Index,typename Coord>
 intr_array_t<Index> unique_sorted_loop_points(
     const std::pmr::vector<loop_point<Index,Coord>> &lpoints,
-    const intr_array_t<Index> &samples,
+    intr_array_t<Index> &samples,
     std::pmr::memory_resource *contig_mem)
 {
     intr_array_t<Index> ordered_loops(contig_mem);
@@ -1290,16 +1320,18 @@ intr_array_t<Index> unique_sorted_loop_points(
         return lpoints[item.p].aux.loop_index;
     };
     std::ranges::sort(ordered_loops,{},loop_id);
-    ordered_loops.resize(
-        std::ranges::begin(std::ranges::unique(ordered_loops,{},loop_id)) - ordered_loops.begin());
+    ordered_loops.resize(static_cast<size_t>(
+        std::ranges::begin(std::ranges::unique(ordered_loops,{},loop_id)) - ordered_loops.begin()));
 
     return ordered_loops;
 }
 
-template<typename Points,typename Index> auto end_point(const Points &points,Index i) noexcept {
+auto end_point(const auto &points,auto i) noexcept {
     return points[points[i].next].data;
 }
 
+/* replace the line indices in the "hits" member of each ordered_loops instance,
+with loop indices and remove the duplicates */
 template<typename Index,typename Coord>
 void replace_line_indices_with_loop_indices(
     const std::pmr::vector<loop_point<Index,Coord>> &lpoints,
@@ -1309,20 +1341,29 @@ void replace_line_indices_with_loop_indices(
 {
     std::pmr::vector<int> inside(loops.size(),0,contig_mem);
     for(auto& item : ordered_loops) {
+        int item_loop_i = lpoints[item.p].aux.loop_index;
+        /* calculate the winding number of every loop for this point */
         for(Index i : item.hits) {
+            // if the index is negative, the line was discarded
+            if(lpoints[i].aux.loop_index < 0
+                || lpoints[i].aux.loop_index == item_loop_i) continue;
+
+            POLY_OPS_ASSERT(static_cast<size_t>(lpoints[i].aux.loop_index) < loops.size());
             point_t<Coord> d = lpoints[i].data - end_point(lpoints,i);
-            inside[lpoints[i].aux.loop_index]
+            inside[static_cast<size_t>(lpoints[i].aux.loop_index)]
                 += ((d.x() ? d.x() : d.y()) > 0) ? 1 : -1;
         }
+
+        /* pretend inside_count is the size of item.hits and "add" the index of
+        each loop with a non-zero winding number */
         std::size_t inside_count = 0;
-        for(std::size_t i=0; i<inside.size(); ++i) {
-            POLY_OPS_ASSERT(inside_count < item.hits.size());
+        for(std::size_t i=0; i < inside.size() && inside_count < item.hits.size(); ++i) {
             if(inside[i]) item.hits[inside_count++] = static_cast<Index>(i);
         }
-        item.hits.resize(inside_count);
+        item.hits.resize(inside_count); // stop pretending
         std::ranges::fill(inside,0);
 
-        item.p = static_cast<Index>(lpoints[item.p].aux.loop_index);
+        item.p = static_cast<Index>(item_loop_i);
     }
 }
 
@@ -1353,12 +1394,14 @@ std::pmr::vector<temp_polygon<Index>*> arrange_loops(
     return top;
 }
 
+/* after calling this function, the items of "samples" are left in an
+unspecified state due to the use of std::move */
 template<typename Index,typename Coord>
 void loop_hierarchy(
     std::pmr::vector<loop_point<Index,Coord>> &lpoints,
     std::pmr::vector<temp_polygon<Index>> &loops,
     std::pmr::vector<temp_polygon<Index>*> &top,
-    const intr_array_t<Index> &samples,
+    intr_array_t<Index> &samples,
     std::pmr::memory_resource *contig_mem)
 {
     auto ordered_loops = unique_sorted_loop_points<Index,Coord>(lpoints,samples,contig_mem);
@@ -1717,8 +1760,7 @@ template<coordinate Coord,std::integral Index=std::size_t> class clipper {
     "sweep_set" */
     std::pmr::vector<detail::sweep_node<Index,Coord>> sweep_nodes;
 
-    detail::broken_starts_t<Index,Coord> broken_starts;
-    detail::broken_ends_t<Index> broken_ends;
+    detail::breaks_t<Index,Coord> breaks;
     detail::rand_generator rgen;
     Index original_i;
     bool ran;
@@ -1777,8 +1819,7 @@ public:
         lpoints(contig_mem),
         samples(contig_mem),
         events(contig_mem),
-        broken_starts(&discrete_mem),
-        broken_ends(contig_mem),
+        breaks(contig_mem,&discrete_mem),
         original_i(static_cast<Index>(-1)),
         ran(false),
         loops_out(contig_mem),
@@ -2195,8 +2236,7 @@ void clipper<Coord,Index>::do_op(bool_op op,i_point_tracker<Index> *pt) {
     ran = true;
 
     events.clear();
-    broken_starts.clear();
-    broken_ends.clear();
+    breaks.clear();
     loops_out.clear();
     top.clear();
 
@@ -2204,21 +2244,36 @@ void clipper<Coord,Index>::do_op(bool_op op,i_point_tracker<Index> *pt) {
     calc_line_bal(op);
 
     for(auto &intr : samples) {
-        detail::follow_balance<Index,Coord>(lpoints,intr.p,broken_ends,broken_starts,pt);
+        detail::follow_balance<Index,Coord>(lpoints,intr.p,breaks,pt);
     }
 
 #if POLY_OPS_GRAPHICAL_DEBUG
-    if(mc__) mc__->console_line_stream() << "broken_starts: " << pp(broken_starts,0) << "\nbroken_ends: " << pp(broken_ends,0);
+    if(mc__) mc__->console_line_stream() << "broken_starts: " << pp(breaks.broken_starts,0) << "\nbroken_ends: " << pp(breaks.broken_ends,0);
     delegate_drawing_trimmed(lpoints);
 #endif
 
+    /* match all the orphan points to virtual points to make the virtual into
+    real points */
+    for(Index intr : breaks.orphans) {
+        auto virts = breaks.virtual_points.find(lpoints[intr].data);
+
+        POLY_OPS_ASSERT(virts != breaks.virtual_points.end() && !virts->second.empty());
+
+        breaks.broken_starts[lpoints[intr].data].push_back(intr);
+
+        detail::virt_point<Index> vp = virts->second.back();
+        virts->second.pop_back();
+        if(vp.next_is_end) breaks.broken_ends.push_back(intr);
+        lpoints[intr].next = vp.next;
+    }
+
     /* match all the points in broken_starts and broken_ends to make new loops
     with the remaining lines */
-    for(Index intr : broken_ends) {
+    for(Index intr : breaks.broken_ends) {
         auto p = end_point(lpoints,intr);
-        auto os = broken_starts.find(p);
+        auto os = breaks.broken_starts.find(p);
 
-        POLY_OPS_ASSERT(os != broken_starts.end() && !os->second.empty());
+        POLY_OPS_ASSERT(os != breaks.broken_starts.end() && !os->second.empty());
 
         Index b_start = 0;
 
@@ -2246,8 +2301,8 @@ void clipper<Coord,Index>::do_op(bool_op op,i_point_tracker<Index> *pt) {
 
     // there shouldn't be any left
     POLY_OPS_ASSERT(std::all_of(
-        broken_starts.begin(),
-        broken_starts.end(),
+        breaks.broken_starts.begin(),
+        breaks.broken_starts.end(),
         [](const auto &v) { return v.second.empty(); }));
     
 #if POLY_OPS_GRAPHICAL_DEBUG

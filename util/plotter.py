@@ -1,6 +1,7 @@
 
 import os
 import operator
+import enum
 import tkinter as tk
 from tkinter import ttk, filedialog
 import json
@@ -9,12 +10,16 @@ from collections import namedtuple,defaultdict
 READ_SIZE = 0x1000
 ZOOM_FACTOR = 1.1
 
+AUX_VIEW_NOTHING = 0
+AUX_VIEW_STATE = 1
+AUX_VIEW_INDEX = 2
+
 class MyEncoder(json.JSONEncoder):
     def default(self,obj):
         if isinstance(obj,Vec):
             return list(obj)
         if isinstance(obj,ScaledLoopPoint):
-            return {'p':obj.p,'next':obj.next}
+            return {'p':obj.p,'next':obj.next,'state':obj.state.value,'loop_i':obj.loop_i}
 
         super().default(obj)
 
@@ -67,10 +72,20 @@ class Vec(namedtuple('_VecBase','x y')):
 
 PADDING = Vec(40,40)
 
+class LineState(enum.Enum):
+    undef = 'undef'
+    check = 'check'
+    discard = 'discard'
+    keep = 'keep'
+    keep_rev = 'keep_rev'
+    invalid = '<invalid>'
+
 class ScaledLoopPoint:
-    def __init__(self,p,next,scaled_p = None):
+    def __init__(self,p,next,state,loop_i,scaled_p = None):
         self.p = Vec(p)
         self.next = next
+        self.state = state
+        self.loop_i = loop_i
         self.scaled_p = scaled_p and Vec(scaled_p)
 
 def run_plotter(file):
@@ -108,14 +123,31 @@ def run_plotter(file):
     maxc = None
     unpadded_area = Vec(0)
 
+    aux_view_ctrl = tk.IntVar(value=AUX_VIEW_NOTHING)
+    view_hline = tk.IntVar()
+    view_vline = tk.IntVar()
+
+    hline_id = None
+    vline_id = None
+
+    # the canvas coordinates of the cursor or None
+    mouse_p = None
+
     def build_scene():
-        nonlocal unpadded_area
+        nonlocal unpadded_area, hline_id, vline_id
+
+        aux_view = aux_view_ctrl.get()
 
         can.delete('all')
         pcan.delete('all')
         p_indices.clear()
+        hline_id = None
+        vline_id = None
 
         if not data: return
+
+        assert maxc is not None
+        assert minc is not None
 
         sfactor = 800 / max(maxc - minc) * scale
 
@@ -126,6 +158,14 @@ def run_plotter(file):
         for i,p in enumerate(data):
             nextp = data[p.next]
             can.create_line(p.scaled_p,nextp.scaled_p,arrow=tk.LAST,tags='_'+str(i))
+        
+        if aux_view != AUX_VIEW_NOTHING:
+            for p in data:
+                if aux_view == AUX_VIEW_INDEX:
+                    text = str(p.loop_i)
+                else:
+                    text = p.state.value
+                can.create_text((p.scaled_p + data[p.next].scaled_p)/2, text=text, fill='#3333aa')
 
         for indices in p_indices.values():
             p = data[indices[0]].scaled_p
@@ -139,14 +179,53 @@ def run_plotter(file):
             0,
             bottom_right.x,
             bottom_right.y))
+
         return bottom_right
+    
+    def update_guide_lines():
+        nonlocal hline_id, vline_id
+
+        cx1 = can.canvasx(0)
+        cx2 = can.canvasx(can.winfo_width())
+        cy1 = can.canvasy(0)
+        cy2 = can.canvasy(can.winfo_height())
+
+        if view_hline.get() and mouse_p is not None:
+            coords = (cx1,mouse_p.y,cx2,mouse_p.y)
+            if hline_id is None:
+                hline_id = can.create_line(*coords)
+            else:
+                can.coords(hline_id,*coords)
+        elif hline_id is not None:
+            can.delete(hline_id)
+            hline_id = None
+
+        if view_vline.get() and mouse_p is not None:
+            coords = (mouse_p.x,cy1,mouse_p.x,cy2)
+            if vline_id is None:
+                vline_id = can.create_line(*coords)
+            else:
+                can.coords(vline_id,*coords)
+        elif vline_id is not None:
+            can.delete(vline_id)
+            vline_id = None
+    
+    def update_data():
+        build_scene()
+        update_guide_lines()
 
     def new_data(e):
         nonlocal data, minc, maxc
 
+        assert data_pend is not None
+
         data = json.loads(data_pend)
         for i,p in enumerate(data):
-            data[i] = ScaledLoopPoint(p['p'],p['next'])
+            data[i] = ScaledLoopPoint(
+                p['p'],
+                p['next'],
+                LineState(p['state']),
+                p['loop_i'])
 
         if data:
             minc = maxc = data[0].p
@@ -154,20 +233,22 @@ def run_plotter(file):
                 minc = Vec.map(min,p.p,minc)
                 maxc = Vec.map(max,p.p,maxc)
 
-        build_scene()
+        update_data()
 
     win.bind('<<NewData>>',new_data)
 
     def onmove(e):
-        nonlocal sel_coord
+        nonlocal sel_coord, mouse_p
 
-        mp = Vec(can.canvasx(e.x),can.canvasy(e.y))
-        cp = pcan.find_closest(*mp)
+        if not data: return
+
+        mouse_p = Vec(can.canvasx(e.x),can.canvasy(e.y))
+        cp = pcan.find_closest(*mouse_p)
         new_coord = -1
         if len(cp):
             pi = ci_to_pi[cp[0]]
             p = data[pi]
-            delta = p.scaled_p - mp
+            delta = p.scaled_p - mouse_p
             if (delta.x*delta.x + delta.y*delta.y) <= 25:
                 new_coord = pi
 
@@ -187,6 +268,8 @@ def run_plotter(file):
                 status['text'] = ''
 
             sel_coord = new_coord
+        
+        update_guide_lines()
 
 
     can.bind('<Motion>',onmove)
@@ -209,10 +292,14 @@ def run_plotter(file):
         can.xview_moveto(scroll.x)
         can.yview_moveto(scroll.y)
 
+        update_guide_lines()
+
     can.bind('<Button-4>',onscroll)
     can.bind('<Button-5>',onscroll)
 
     def onsave(e):
+        if not data: return
+
         f = filedialog.asksaveasfile(parent=win,defaultextension='.txt')
         if f is None: return
 
@@ -246,6 +333,18 @@ def run_plotter(file):
 
     win.tk.createfilehandler(file,tk.READABLE,file_handler)
 
+    menu = tk.Menu(win)
+
+    view_menu = tk.Menu(menu,tearoff=False)
+    view_menu.add_radiobutton(label='Hide Aux',value=AUX_VIEW_NOTHING,variable=aux_view_ctrl,command=update_data)
+    view_menu.add_radiobutton(label='Show Aux State',value=AUX_VIEW_STATE,variable=aux_view_ctrl,command=update_data)
+    view_menu.add_radiobutton(label='Show Aux Loop Index',value=AUX_VIEW_INDEX,variable=aux_view_ctrl,command=update_data)
+    view_menu.add_separator()
+    view_menu.add_checkbutton(label='Show Horizontal Guide',variable=view_hline,command=update_guide_lines)
+    view_menu.add_checkbutton(label='Show Vertical Guide',variable=view_vline,command=update_guide_lines)
+    menu.add_cascade(label='View',menu=view_menu)
+
+    win.config(menu=menu)
     win.mainloop()
 
 
