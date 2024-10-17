@@ -748,13 +748,13 @@ origin point.
 template<typename Index,typename Coord> class line_balance {
     const loop_point<Index,Coord> *points;
     Index p1;
-    std::pmr::vector<Index> &intrs_tmp;
+    std::pmr::vector<segment<Index>> &intrs_tmp;
     point_t<Coord> dp1;
     Coord hsign;
     int wn[2];
 
 public:
-    line_balance(const loop_point<Index,Coord> *points,Index p1,std::pmr::vector<Index> &intrs_tmp) :
+    line_balance(const loop_point<Index,Coord> *points,Index p1,std::pmr::vector<segment<Index>> &intrs_tmp) :
         points(points), p1(p1), intrs_tmp(intrs_tmp),
         dp1(line_delta(points,p1)),
         hsign(hsign_of(dp1)), wn{0,0}
@@ -780,7 +780,7 @@ public:
                 main_i > p1))
             {
                 wn[static_cast<int>(points[main_i].bset())] += a_is_main ? 1 : -1;
-                intrs_tmp.push_back(main_i);
+                intrs_tmp.emplace_back(main_i,a_is_main ? s.b : s.a);
             }
         }
     }
@@ -1101,15 +1101,6 @@ template<typename Coord,sized_or_forward_point_range_range<Coord> T> struct tota
     }
 };
 
-template<typename Index>
-struct intr_t {
-    Index p;
-    std::pmr::vector<Index> hits;
-};
-
-template<typename Index>
-using intr_array_t = std::pmr::vector<intr_t<Index>>;
-
 /* This is only used for debugging */
 template<typename Index,typename Coord>
 bool intersects_any(const sweep_node<Index,Coord> &s1,const sweep_t<Index,Coord> &sweep,std::pmr::vector<loop_point<Index,Coord>> &lpoints) {
@@ -1293,6 +1284,19 @@ void find_loops(
     }
 }
 
+template<typename Index>
+struct intr_t {
+    Index p;
+
+    /* both ends are recorded so that this can be used after line segments are
+    reversed */
+    std::pmr::vector<segment<Index>> hits;
+};
+
+template<typename Index>
+using intr_array_t = std::pmr::vector<intr_t<Index>>;
+
+
 /* Take an array of intr_t instances ("samples") where each "p" member refers to
 a point, and create a new array with the same data, except the "p" member refers
 to a loop. If the item doesn't refer to a loop, it's not included in the new
@@ -1343,24 +1347,31 @@ void replace_line_indices_with_loop_indices(
     for(auto& item : ordered_loops) {
         int item_loop_i = lpoints[item.p].aux.loop_index;
         /* calculate the winding number of every loop for this point */
-        for(Index i : item.hits) {
-            // if the index is negative, the line was discarded
-            if(lpoints[i].aux.loop_index < 0
-                || lpoints[i].aux.loop_index == item_loop_i) continue;
+        for(segment<Index> s1 : item.hits) {
+            /* The line segment may have been reversed and reconnected to a
+            different point, so we need to determine which point or points are
+            currently the start of a line segment with the same coordinates as
+            the points of "s1" */
+            for(segment<Index> s : {s1,segment{s1.b,s1.a}}) {
+                Index i = s.a;
+                if(lpoints[lpoints[i].next].data != lpoints[s.b].data) continue;
 
-            POLY_OPS_ASSERT(static_cast<size_t>(lpoints[i].aux.loop_index) < loops.size());
-            point_t<Coord> d = lpoints[i].data - end_point(lpoints,i);
-            inside[static_cast<size_t>(lpoints[i].aux.loop_index)]
-                += ((d.x() ? d.x() : d.y()) > 0) ? 1 : -1;
+                // if the index is negative, the line was discarded
+                if(lpoints[i].aux.loop_index < 0
+                    || lpoints[i].aux.loop_index == item_loop_i) continue;
+
+                POLY_OPS_ASSERT(static_cast<std::size_t>(lpoints[i].aux.loop_index) < loops.size());
+                point_t<Coord> d = lpoints[i].data - end_point(lpoints,i);
+                inside[static_cast<std::size_t>(lpoints[i].aux.loop_index)]
+                    += ((d.x() ? d.x() : d.y()) > 0) ? 1 : -1;
+            }
         }
 
-        /* pretend inside_count is the size of item.hits and "add" the index of
-        each loop with a non-zero winding number */
-        std::size_t inside_count = 0;
-        for(std::size_t i=0; i < inside.size() && inside_count < item.hits.size(); ++i) {
-            if(inside[i]) item.hits[inside_count++] = static_cast<Index>(i);
+        item.hits.clear();
+        for(std::size_t i=0; i < inside.size(); ++i) {
+            if(inside[i]) item.hits.emplace_back(static_cast<Index>(i),Index(0));
         }
-        item.hits.resize(inside_count); // stop pretending
+
         std::ranges::fill(inside,0);
 
         item.p = static_cast<Index>(item_loop_i);
@@ -1381,8 +1392,8 @@ std::pmr::vector<temp_polygon<Index>*> arrange_loops(
         if(item.hits.empty()) top.push_back(&loops[item.p]);
         else {
             for(auto outer_i : item.hits) {
-                if(ordered_loops[outer_i].hits.size() == (item.hits.size() - 1)) {
-                    loops[outer_i].children.push_back(&loops[item.p]);
+                if(ordered_loops[outer_i.a].hits.size() == (item.hits.size() - 1)) {
+                    loops[outer_i.a].children.push_back(&loops[item.p]);
                     goto next;
                 }
             }
@@ -1491,6 +1502,8 @@ struct iterator_facade {
 /* this is basically std::ranges::transform_view except it supports r-value
 references on GCC 11 */
 template<typename R,typename F> struct range_facade {
+    static constexpr bool const_executable = std::is_invocable_v<const F,std::ranges::range_value_t<R>>;
+
     R base;
     F fun;
 
@@ -1507,11 +1520,18 @@ template<typename R,typename F> struct range_facade {
     auto begin() noexcept { return iterator_facade<std::ranges::iterator_t<R>,F>{std::ranges::begin(base),&fun}; }
     auto end() noexcept { return iterator_facade<std::ranges::iterator_t<R>,F>{std::ranges::end(base),&fun}; }
 
-    auto begin() const noexcept requires std::is_invocable_v<const F,std::ranges::range_value_t<R>> {
+    auto begin() const noexcept requires const_executable {
         return iterator_facade<std::ranges::iterator_t<const R>,const F>{std::ranges::begin(base),&fun};
     }
-    auto end() const noexcept requires std::is_invocable_v<const F,std::ranges::range_value_t<R>> {
+    auto end() const noexcept requires const_executable {
         return iterator_facade<std::ranges::iterator_t<const R>,const F>{std::ranges::end(base),&fun};
+    }
+
+    auto operator[](auto n) -> decltype(fun(base[n])) {
+        return fun(base[n]);
+    }
+    auto operator[](auto n) const -> decltype(fun(base[n])) {
+        return fun(base[n]);
     }
 };
 
@@ -1526,8 +1546,8 @@ auto make_temp_polygon_tree_range(
     Tracker &&tracker)
 {
     return range_facade(
-        top,
-        [tl=make_tracked_points(tracker,lpoints)]
+        std::move(top),
+        [tl=make_tracked_points(std::forward<Tracker>(tracker),std::move(lpoints))]
         (const temp_polygon<Index> *poly) {
             return temp_polygon_proxy<Coord,Index,Tracker>(tl.lpoints,*poly,tl.tracker());
         });
@@ -2193,7 +2213,7 @@ void clipper<Coord,Index>::calc_line_bal(bool_op op) {
 
     auto scan = [&,this](Index i) {
         if(lpoints[i].state() == line_state_t::check) {
-            samples.emplace_back(i,std::pmr::vector<Index>(contig_mem));
+            samples.emplace_back(i,std::pmr::vector<segment<Index>>(contig_mem));
             line_balance<Index,Coord> lb{lpoints.data(),i,samples.back().hits};
             for(const sweep_node<Index,Coord> &s : sweep) lb.check(s.value);
             for(segment<Index> s : events.touching_removed(lpoints)) lb.check(s);

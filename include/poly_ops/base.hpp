@@ -572,7 +572,6 @@ template<typename Index> struct segment_common {
 
     segment_common() = default;
     segment_common(Index a,Index b) noexcept : a{a}, b{b} {}
-    segment_common(const segment_common&) = default;
 
     /* returns true if point 'a' comes before point 'b' in the loop */
     template<typename T> bool a_is_main(const T &points) const {
@@ -589,8 +588,8 @@ protected:
 };
 
 template<typename Index> struct segment : segment_common<Index> {
-    using segment_common<Index>::segment_common;
-
+    segment() = default;
+    segment(Index a,Index b) noexcept : segment_common<Index>{a,b} {}
     segment(const segment_common<Index> &s) noexcept : segment_common<Index>(s) {}
 
     auto a_x(const auto &points) const { return points[this->a].data[0]; }
