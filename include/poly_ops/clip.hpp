@@ -25,11 +25,6 @@ inside functions marked as "noexcept". In such cases, "assert" is used. */
 #include "sweep_set.hpp"
 
 
-#ifndef POLY_OPS_GRAPHICAL_DEBUG
-#define POLY_OPS_GRAPHICAL_DEBUG 0
-#endif
-
-// the graphical test program defines these
 #ifndef POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F
 #define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F
 #define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_FR
@@ -83,26 +78,6 @@ public:
      * \param to The index of the point that follows `from`.
      */
     virtual void point_merge(Index from,Index to) = 0;
-
-    /**
-     * Called when one point is duplicated and another is discarded.
-     *
-     * Just as with "point_added", the implicit index of the new duplicate point
-     * is one greater than the index of the previously added point. Indices are
-     * never reused, thus deletions do not affect index assignment.
-     *
-     * Here, deletion means the point is never referenced again. It is not
-     * actually deleted from the internal representation, which is why the index
-     * cannot be reused.
-     *
-     * "to_delete" can be ignored. It is given so that if tracked points require
-     * memory allocation, its memory can be reused for the duplicate point.
-     *
-     * This method will be called, at most, as many times are there are
-     * intersections plus the number of loops. In the case of the `union`
-     * operation, it is never called.
-     */
-    virtual void point_copy_and_delete(Index to_copy,Index to_delete) = 0;
 
     /**
      * Called for every point initially added.
@@ -226,7 +201,23 @@ enum class bool_set {subject=0,clip=1};
 
 namespace detail {
 
-enum class line_state_t {undef,check,discard,keep,keep_rev};
+enum class line_state_t : unsigned char {
+    undef=0b100,
+    check=0b1000,
+    discard=0b0,
+    keep=0b1,
+    reverse=0b10,
+
+    /* this state is needed because if a segment has a state of "keep_rev", it
+    needs a new first point that must come from another reversed line, even if
+    the other line isn't kept */
+    discard_rev=discard|reverse,
+
+    keep_rev=keep|reverse};
+
+inline line_state_t operator&(line_state_t a,line_state_t b) {
+    return static_cast<line_state_t>(static_cast<unsigned char>(a) & static_cast<unsigned char>(b));
+}
 
 struct line_desc {
     bool_set cat;
@@ -250,23 +241,7 @@ template<typename Index,typename Coord> struct loop_point {
     
     bool has_line_bal() const {
         POLY_OPS_ASSERT(aux.desc.state != line_state_t::check);
-        switch(aux.desc.state) {
-        case line_state_t::undef:
-        case line_state_t::check:
-            return false;
-        default:
-            return true;
-        }
-    }
-
-    bool keep() const {
-        switch(aux.desc.state) {
-        case line_state_t::keep_rev:
-        case line_state_t::keep:
-            return true;
-        default:
-            return false;
-        }
+        return aux.desc.state != line_state_t::undef;
     }
 
     bool_set bset() const { return aux.desc.cat; }
@@ -811,6 +786,7 @@ public:
                 }
             } else if(wc == 0) {
                 if(ws > 0) return line_state_t::keep_rev;
+                return line_state_t::discard_rev;
             }
             return line_state_t::discard;
         case bool_op::normalize:
@@ -1143,6 +1119,7 @@ bool consistent_order(const sweep_t<Index,Coord> &sweep) {
 
 template<typename Index> struct virt_point {
     Index next;
+    bool keep;
     bool next_is_end;
 };
 
@@ -1206,9 +1183,9 @@ void follow_balance(
         Index real_next_next = points[next].next;
 
         points[next].state() = points[intr].state();
-        if(points[intr].state() == line_state_t::discard) {
+        if((points[intr].state() & line_state_t::keep) != line_state_t::keep) {
             if(pt) pt->point_merge(prev,next);
-        } else if(points[intr].state() == line_state_t::keep_rev) {
+        } else if((points[intr].state() & line_state_t::reverse) == line_state_t::reverse) {
             /* the actual points should not be moved, to make point-tracking
             simpler */
             points[next].next = prev;
@@ -1229,18 +1206,25 @@ void follow_balance(
         breaks.broken_ends.push_back(prev);
         break;
     case line_state_t::keep_rev:
+    case line_state_t::discard_rev:
         breaks.orphans.push_back(intr);
 
-        /* The new second-last point is the point after "intr". If the point
-        after "intr" is the old last point, the second-last point is the new
-        first point. */
-        if(prev == intr) {
-            next_is_end = true;
-        } else {
-            breaks.broken_ends.push_back(points[intr].next);
+        if(points[intr].state() == line_state_t::keep_rev) {
+            /* The new second-last point is the point after "intr". If the point
+            after "intr" is the old last point, the second-last point is the new
+            first point. */
+            if(prev == intr) {
+                // add to "broken_ends" when we have 
+                next_is_end = true;
+            } else {
+                breaks.broken_ends.push_back(points[intr].next);
+            }
         }
 
-        breaks.virtual_points[points[next].data].emplace_back(prev,next_is_end);
+        breaks.virtual_points[points[next].data].emplace_back(
+            prev,
+            points[intr].state() == line_state_t::keep_rev,
+            next_is_end);
 
         break;
     default:
@@ -2267,11 +2251,6 @@ void clipper<Coord,Index>::do_op(bool_op op,i_point_tracker<Index> *pt) {
         detail::follow_balance<Index,Coord>(lpoints,intr.p,breaks,pt);
     }
 
-#if POLY_OPS_GRAPHICAL_DEBUG
-    if(mc__) mc__->console_line_stream() << "broken_starts: " << pp(breaks.broken_starts,0) << "\nbroken_ends: " << pp(breaks.broken_ends,0);
-    delegate_drawing_trimmed(lpoints);
-#endif
-
     /* match all the orphan points to virtual points to make the virtual into
     real points */
     for(Index intr : breaks.orphans) {
@@ -2279,11 +2258,22 @@ void clipper<Coord,Index>::do_op(bool_op op,i_point_tracker<Index> *pt) {
 
         POLY_OPS_ASSERT(virts != breaks.virtual_points.end() && !virts->second.empty());
 
-        breaks.broken_starts[lpoints[intr].data].push_back(intr);
-
         detail::virt_point<Index> vp = virts->second.back();
         virts->second.pop_back();
-        if(vp.next_is_end) breaks.broken_ends.push_back(intr);
+
+        /* by now, it doesn't matter what the value of
+        "lpoints[intr].state() & detail::line_state_t::reverse" is*/
+        if(vp.keep) {
+            breaks.broken_starts[lpoints[intr].data].push_back(intr);
+            lpoints[intr].state() = detail::line_state_t::keep;
+        } else {
+            lpoints[intr].state() = detail::line_state_t::discard;
+        }
+
+        if(vp.next_is_end) {
+            assert(vp.keep);
+            breaks.broken_ends.push_back(intr);
+        }
         lpoints[intr].next = vp.next;
     }
 
@@ -2324,13 +2314,9 @@ void clipper<Coord,Index>::do_op(bool_op op,i_point_tracker<Index> *pt) {
         breaks.broken_starts.begin(),
         breaks.broken_starts.end(),
         [](const auto &v) { return v.second.empty(); }));
-    
-#if POLY_OPS_GRAPHICAL_DEBUG
-    delegate_drawing_trimmed(lpoints);
-#endif
 
     for(auto &lp : lpoints) {
-        if(lp.keep()) lp.aux.loop_index = -1;
+        if((lp.state() & detail::line_state_t::keep) == detail::line_state_t::keep) lp.aux.loop_index = -1;
         else lp.aux.loop_index = -2;
     }
 

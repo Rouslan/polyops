@@ -159,11 +159,6 @@ public:
         original_sets[to].merge(original_sets[from]);
     }
 
-    void point_copy_and_delete(Index to_copy,Index to_delete) override {
-        original_sets.emplace_back(std::move(original_sets[to_delete]));
-        original_sets.back() = original_sets[to_copy];
-    }
-
     void points_removed(Index n) override {
         original_sets.resize(original_sets.size()-static_cast<std::size_t>(n));
     }
