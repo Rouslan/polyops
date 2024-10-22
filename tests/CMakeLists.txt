@@ -54,4 +54,5 @@ add_executable(gen_discontinuous gen_discontinuous.cpp bitmap.cpp)
 add_custom_target(test_bin)
 add_dependencies(test_bin btest whitebox test_large_ints_ext test_large_ints_noext misc_tests)
 
+add_executable(polyops_debug_log EXCLUDE_FROM_ALL polyops_debug_log.cpp)
 add_executable(polydraw_debug_log EXCLUDE_FROM_ALL polydraw_debug_log.cpp)

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+  <Type Name="poly_ops::point_t&lt;*&gt;">
+    <DisplayString>{{{_data[0]},{_data[1]}}}</DisplayString>
+  </Type>
+  <Type Name="poly_ops::detail::segment&lt;*&gt;">
+    <DisplayString>{{a={a}, b={b}}}</DisplayString>
+  </Type>
+	<Type Name="poly_ops::detail::cached_segment&lt;*&gt;">
+		<DisplayString>{{a={a} {pa}, b={b} {pb}}}</DisplayString>
+	</Type>
+  <Type Name="poly_ops::detail::sweep_set&lt;*&gt;">
+	  <DisplayString>{{sweep_set}}</DisplayString>
+	  <Expand>
+		  <CustomListItems MaxItemsPerView="500">
+			  <Variable Name="NIL" InitialValue="~$T2(0)"/>
+			  <Variable Name="nodes" InitialValue="traits_val.vec->_Mypair._Myval2._Myfirst"/>
+			  <Variable Name="n" InitialValue="nodes[0].left"/>
+			  <Variable Name="next_n" InitialValue="n"/>
+
+			  <Loop>
+				  <Break Condition="n == 0"/>
+				  <Item>nodes[n].value</Item>
+				  <Exec>next_n = nodes[n].right</Exec>
+				  <If Condition="next_n != NIL">
+					  <Loop>
+						  <Exec>n = next_n</Exec>
+						  <Exec>next_n = nodes[n].right</Exec>
+						  <Break Condition="next_n == NIL"/>
+					  </Loop>
+				  </If>
+				  <Else>
+					  <Exec>next_n = nodes[n].parent</Exec>
+					  <Loop>
+						  <Break Condition="n != nodes[next_n].right"/>
+						  <Exec>n = next_n</Exec>
+						  <Exec>next_n = nodes[n].parent</Exec>
+					  </Loop>
+					  <If Condition="nodes[n].right != next_n">
+						  <Exec>n = next_n</Exec>
+					  </If>
+				  </Else>
+			  </Loop>
+		  </CustomListItems>
+	  </Expand>
+  </Type>
+</AutoVisualizer>

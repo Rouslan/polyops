@@ -221,7 +221,7 @@ template<typename Coord> void read_loops(std::istream &is,std::vector<std::vecto
 
     stream_exceptions_saver ses(is);
 
-    is.exceptions(is.badbit | is.failbit);
+    is.exceptions(is.badbit);
     for(;;) {
         is >> std::ws;
         if(is.eof()) {
@@ -235,6 +235,9 @@ template<typename Coord> void read_loops(std::istream &is,std::vector<std::vecto
             if(!loops.back().empty()) loops.emplace_back();
         } else {
             is >> p[c_count++];
+            if(is.fail()) {
+                throw std::runtime_error("invalid input format");
+            }
             if(c_count > 1) {
                 c_count = 0;
                 loops.back().push_back(p);
@@ -271,7 +274,7 @@ struct std::formatter<delimited_t<R>,char> {
         return ctx.begin();
     }
     template<typename FmtContext>
-    FmtContext::iterator format(const delimited_t<R> &d,FmtContext &ctx) const {
+    FmtContext::iterator format(delimited_t<R> &d,FmtContext &ctx) const {
         auto out = ctx.out();
         bool started = false;
         for(auto &&item : d.items) {
@@ -297,6 +300,18 @@ struct std::formatter<poly_ops::detail::sweep_set<T,Index,Compare,Vec>,char> {
             ctx.out(),
             "{{{}}}",
             delimited(s | std::views::transform([](const auto &node) -> decltype(auto) { return node.value; })));
+    }
+};
+
+template<typename T>
+struct std::formatter<poly_ops::point_t<T>,char> {
+    template<typename ParseContext>
+    constexpr ParseContext::iterator parse(ParseContext &ctx) const {
+        return ctx.begin();
+    }
+    template<typename FmtContext>
+    FmtContext::iterator format(const poly_ops::point_t<T> &p,FmtContext &ctx) const {
+        return std::format_to(ctx.out(),"{{{},{}}}",p.x(),p.y());
     }
 };
 

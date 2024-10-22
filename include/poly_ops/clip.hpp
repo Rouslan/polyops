@@ -25,14 +25,11 @@ inside functions marked as "noexcept". In such cases, "assert" is used. */
 #include "sweep_set.hpp"
 
 
-#ifndef POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F
-#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F
-#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_FR
-#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_B
-#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_BR
-#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE
-#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_SAMPLE
-#define POLY_OPS_DEBUG_STEP_BY_STEP_MISSED_INTR (void)0
+#ifndef POLY_OPS_DEBUG_LOG
+#define POLY_OPS_DEBUG_LOG(...) (void)0
+#endif
+
+#ifndef POLY_OPS_DEBUG_ITERATION
 #define POLY_OPS_DEBUG_ITERATION
 #endif
 
@@ -409,6 +406,13 @@ bool intersects_parallel(
 intersection points. Its output doesn't need to be high quality. */
 using rand_generator = std::minstd_rand;
 
+/* std::uniform_int_distribution(0,1) appears to behave differently between
+GCC's and MSVC's libraries, so it isn't used */
+bool rand_bool(rand_generator &rgen) {
+    constexpr auto mid = rand_generator::min() + (rand_generator::max() - rand_generator::min()) / 2;
+    return rgen() > mid;
+}
+
 /* Check if two line segments intersect.
 
 Returns "true" if the lines intersect. Adjacent lines do not count as
@@ -480,10 +484,8 @@ bool intersects(
         creates yet another intersection, and so forth, until the lines are
         nowhere near where they started. */
 
-        std::uniform_int_distribution<unsigned short> rdist(0,1);
-
-        p[0] = static_cast<Coord>(x1 + (rdist(rgen) ? coord_ops<Coord>::floor(rx) : coord_ops<Coord>::ceil(rx)));
-        p[1] = static_cast<Coord>(y1 + (rdist(rgen) ? coord_ops<Coord>::floor(ry) : coord_ops<Coord>::ceil(ry)));
+        p[0] = static_cast<Coord>(x1 + (rand_bool(rgen) ? coord_ops<Coord>::floor(rx) : coord_ops<Coord>::ceil(rx)));
+        p[1] = static_cast<Coord>(y1 + (rand_bool(rgen) ? coord_ops<Coord>::floor(ry) : coord_ops<Coord>::ceil(ry)));
 
         at_edge[0] = at_edge_t::no;
         at_edge[1] = at_edge_t::no;
@@ -1093,7 +1095,7 @@ bool intersects_any(const sweep_node<Index,Coord> &s1,const sweep_t<Index,Coord>
         if(intersects(s1.value,s2.value,intr,at_edge,rgen) &&
                 (at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no ||
                 !(is_marked(at_edge[0],s1) && is_marked(at_edge[1],s2)))) {
-            POLY_OPS_DEBUG_STEP_BY_STEP_MISSED_INTR;
+            POLY_OPS_DEBUG_LOG("Missed intersection between {} and {}!",s1.value,s2.value);
             return true;
         }
     }
@@ -1327,6 +1329,8 @@ void replace_line_indices_with_loop_indices(
     intr_array_t<Index> &ordered_loops,
     std::pmr::memory_resource *contig_mem)
 {
+    POLY_OPS_DEBUG_LOG("LOOP MEMBERSHIP:");
+
     std::pmr::vector<int> inside(loops.size(),0,contig_mem);
     for(auto& item : ordered_loops) {
         int item_loop_i = lpoints[item.p].aux.loop_index;
@@ -1350,6 +1354,10 @@ void replace_line_indices_with_loop_indices(
                     += ((d.x() ? d.x() : d.y()) > 0) ? 1 : -1;
             }
         }
+
+        POLY_OPS_DEBUG_LOG("{}: {}",
+            item.p,
+            delimited(std::views::iota(std::size_t(0),inside.size()) | std::views::filter([&](auto i) { return inside[i] != 0; })));
 
         item.hits.clear();
         for(std::size_t i=0; i < inside.size(); ++i) {
@@ -2073,6 +2081,8 @@ bool clipper<Coord,Index>::check_intersection(
     if(intersects(sweep_nodes[s1].value,sweep_nodes[s2].value,intr,at_edge,rgen)) {
         POLY_OPS_ASSERT((at_edge[0] == at_edge_t::both) == (at_edge[1] == at_edge_t::both));
 
+        POLY_OPS_DEBUG_LOG("checking intersection of {} and {}: {}",sweep_nodes[s1].value,sweep_nodes[s2].value,intr);
+
         Index intr1,intr2;
 
         if(at_edge[0] == at_edge_t::no || at_edge[1] == at_edge_t::no) [[likely]] {
@@ -2099,6 +2109,8 @@ bool clipper<Coord,Index>::check_intersection(
                 lpoints[intr2].state() = line_state_t::check;
             }
         }
+    } else {
+        POLY_OPS_DEBUG_LOG("checking intersection of {} and {}: none",sweep_nodes[s1].value,sweep_nodes[s2].value);
     }
 
     return false;
@@ -2153,14 +2165,14 @@ void clipper<Coord,Index>::self_intersection(i_point_tracker<Index> *pt) {
                 auto [itr,inserted] = sweep.insert(e.sweep_node);
                 POLY_OPS_ASSERT(inserted);
 
-                POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F
+                POLY_OPS_DEBUG_LOG("FORWARD {} at {}",e.ab,lpoints[e.ab.a].data);
 
                 if(itr != sweep.begin() && check_intersection(sweep,e.sweep_node,std::prev(itr).index(),pt)) continue;
                 ++itr;
                 if(itr != sweep.end()) check_intersection(sweep,e.sweep_node,itr.index(),pt);
             } else {
                 sweep.erase(e.sweep_node);
-                POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_FR
+                POLY_OPS_DEBUG_LOG("UNDO FORWARD {}",e.ab);
             }
             break;
         case event_type_t::backward:
@@ -2170,7 +2182,7 @@ void clipper<Coord,Index>::self_intersection(i_point_tracker<Index> *pt) {
                 if(!sweep.unique(e.sweep_node)) {
                     auto itr = sweep.erase(e.sweep_node);
 
-                    POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_B
+                    POLY_OPS_DEBUG_LOG("BACKWARD {} at {}",e.ab,lpoints[e.ab.a].data);
 
                     if(itr != sweep.end() && itr != sweep.begin()) {
                         check_intersection(sweep,std::prev(itr).index(),itr.index(),pt);
@@ -2182,7 +2194,7 @@ void clipper<Coord,Index>::self_intersection(i_point_tracker<Index> *pt) {
                 }
             } else {
                 sweep.insert(e.sweep_node);
-                POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_BR
+                POLY_OPS_DEBUG_LOG("UNDO BACKWARD {}",e.ab);
             }
             break;
         }
@@ -2204,7 +2216,7 @@ void clipper<Coord,Index>::calc_line_bal(bool_op op) {
             for(segment<Index> s : events.touching_pending(lpoints)) lb.check(s);
             lpoints[i].state() = lb.result(op);
 
-            POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_SAMPLE
+            POLY_OPS_DEBUG_LOG("LINE TEST at {}: {}",i,delimited(samples.back().hits));
         }
     };
 
@@ -2606,14 +2618,5 @@ auto boolean_op(SInput &&subject,CInput &&clip,bool_op op,std::pmr::memory_resou
 }
 
 } // namespace poly_ops
-
-#undef POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F
-#undef POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_FR
-#undef POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_B
-#undef POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_BR
-#undef POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE
-#undef POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_SAMPLE
-#undef POLY_OPS_DEBUG_STEP_BY_STEP_MISSED_INTR
-#undef POLY_OPS_DEBUG_ITERATION
 
 #endif
