@@ -76,8 +76,14 @@ class LineState(enum.Enum):
     undef = 'undef'
     check = 'check'
     discard = 'discard'
+    discard_rev = 'discard_rev'
     keep = 'keep'
     keep_rev = 'keep_rev'
+    anchor_undef = 'anchor_undef'
+    anchor_discard = 'anchor_discard'
+    anchor_discard_rev = 'anchor_discard_rev'
+    anchor_keep = 'anchor_keep'
+    anchor_keep_rev = 'anchor_keep_rev'
     invalid = '<invalid>'
 
 class ScaledLoopPoint:

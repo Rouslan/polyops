@@ -65,7 +65,7 @@ int main() {
 
         /* This shape should decompose into exactly 10 shapes and 0 holes */
         auto out = poly_ops::normalize_op<true,int>(loops);
-        expect(out.size() == 10_i);
+        expect(out.size() == 10_u);
         expect(std::ranges::all_of(out,[](auto loop) { return loop.inner_loops().size() == 0; }));
     };
 
@@ -89,24 +89,24 @@ int main() {
         }};
 
         auto out = make_array_trees(poly_ops::normalize_op<true,int>(loops));
-        expect(out.size() == 1_i);
-        expect(out[0].size() == 9_i);
+        expect(out.size() == 1_u);
+        expect(out[0].size() == 9_u);
         sort_by_size(out[0].inner_loops);
 
-        expect(out[0].inner_loops[0].size() == 3_i);
-        expect(out[0].inner_loops[0].inner_loops.size() == 0_i);
+        expect(out[0].inner_loops[0].size() == 3_u);
+        expect(out[0].inner_loops[0].inner_loops.size() == 0_u);
 
-        expect(out[0].inner_loops[1].size() == 7_i);
-        expect(out[0].inner_loops[1].inner_loops.size() == 1_i);
-        expect(out[0].inner_loops[1].inner_loops[0].size() == 5_i);
-        expect(out[0].inner_loops[1].inner_loops[0].inner_loops.size() == 0_i);
+        expect(out[0].inner_loops[1].size() == 7_u);
+        expect(out[0].inner_loops[1].inner_loops.size() == 1_u);
+        expect(out[0].inner_loops[1].inner_loops[0].size() == 5_u);
+        expect(out[0].inner_loops[1].inner_loops[0].inner_loops.size() == 0_u);
 
-        expect(out[0].inner_loops[2].size() == 8_i);
-        expect(out[0].inner_loops[2].inner_loops.size() == 1_i);
-        expect(out[0].inner_loops[2].inner_loops[0].size() == 6_i);
-        expect(out[0].inner_loops[2].inner_loops[0].inner_loops.size() == 1_i);
-        expect(out[0].inner_loops[2].inner_loops[0].inner_loops[0].size() == 4_i);
-        expect(out[0].inner_loops[2].inner_loops[0].inner_loops[0].inner_loops.size() == 0_i);
+        expect(out[0].inner_loops[2].size() == 8_u);
+        expect(out[0].inner_loops[2].inner_loops.size() == 1_u);
+        expect(out[0].inner_loops[2].inner_loops[0].size() == 6_u);
+        expect(out[0].inner_loops[2].inner_loops[0].inner_loops.size() == 1_u);
+        expect(out[0].inner_loops[2].inner_loops[0].inner_loops[0].size() == 4_u);
+        expect(out[0].inner_loops[2].inner_loops[0].inner_loops[0].inner_loops.size() == 0_u);
     };
 
     return 0;

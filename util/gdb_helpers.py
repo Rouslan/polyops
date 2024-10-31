@@ -42,8 +42,11 @@ class Plotter(gdb.Command):
         if size > MAX_PLOT_SIZE: size = MAX_PLOT_SIZE
 
         line_state_t_names = {}
-        for name in ('undef','check','discard','keep','keep_rev'):
-            val = gdb.lookup_global_symbol('poly_ops::detail::line_state_t::' + name)
+        for name in (
+                'undef','check','discard','discard_rev','keep','keep_rev',
+                'anchor_undef','anchor_discard','anchor_discard_rev',
+                'anchor_keep','anchor_keep_rev'):
+            val = gdb.lookup_global_symbol('poly_ops::detail::line_state::' + name)
             line_state_t_names[val] = name
 
         points = [cpp_loop_val_to_py(data[i],line_state_t_names) for i in range(size)]

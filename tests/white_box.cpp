@@ -15,14 +15,6 @@
 #define POLY_OPS_ASSERT(X) if(!(X)) throw assertion_failure{#X,__FILE__,__LINE__}
 #define POLY_OPS_ASSERT_SLOW POLY_OPS_ASSERT
 
-#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_F
-#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_FR
-#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_B
-#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_BR
-#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_BALANCE
-#define POLY_OPS_DEBUG_STEP_BY_STEP_EVENT_CALC_SAMPLE
-#define POLY_OPS_DEBUG_STEP_BY_STEP_MISSED_INTR (void)0
-
 #define POLY_OPS_DEBUG_ITERATION if(timeout && std::chrono::steady_clock::now() > timeout_expiry) { \
     timeout = false; \
     throw timed_out{}; \
