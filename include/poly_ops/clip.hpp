@@ -1820,6 +1820,7 @@ template<coordinate Coord,std::integral Index=std::size_t> class clipper {
         Index s2,
         i_point_tracker<Index> *pt);
     void add_fb_events(Index sa,Index sb);
+    Index insert_anchor_point(Index i);
     void do_op(bool_op op,i_point_tracker<Index> *pt,bool TreeOut);
 
     template<point_range<Coord> R> void _add_loop(R &&loop,bool_set cat,i_point_tracker<Index> *pt) {
@@ -2272,6 +2273,19 @@ void clipper<Coord,Index>::calc_line_bal(bool_op op) {
 }
 
 template<coordinate Coord,std::integral Index>
+Index clipper<Coord,Index>::insert_anchor_point(Index i) {
+    if(!(lpoints[lpoints[i].next].state() & detail::line_state::anchor)) {
+        Index new_i = Index(lpoints.size());
+        lpoints.push_back(lpoints[i]);
+        lpoints.back().state() = detail::line_state::anchor_undef;
+        lpoints[i].next = new_i;
+
+        POLY_OPS_DEBUG_LOG("Adding anchor point {} after {}",new_i,i);
+    }
+    return lpoints[i].next;
+}
+
+template<coordinate Coord,std::integral Index>
 void clipper<Coord,Index>::do_op(bool_op op,i_point_tracker<Index> *pt,bool tree_out) {
     using namespace detail;
 
@@ -2293,22 +2307,18 @@ void clipper<Coord,Index>::do_op(bool_op op,i_point_tracker<Index> *pt,bool tree
     overlapping line segments changing in the next few steps */
     if(tree_out) {
         for(auto &intr : samples) {
-            for(Index &i : intr.hits) {
-                if(!(lpoints[lpoints[i].next].state() & line_state::anchor)) {
-                    Index new_i = Index(lpoints.size());
-                    lpoints.push_back(lpoints[i]);
-                    lpoints.back().state() = line_state::anchor_undef;
-                    lpoints[i].next = new_i;
-
-                    POLY_OPS_DEBUG_LOG("Adding anchor point {} after {}",new_i,i);
-                }
-                i = lpoints[i].next;
-            }
+            for(Index &i : intr.hits) i = insert_anchor_point(i);
         }
-    }
-
-    for(auto &intr : samples) {
-        follow_balance<Index,Coord>(lpoints,intr.p,breaks,pt);
+        for(auto &intr : samples) {
+            follow_balance<Index,Coord>(
+                lpoints,
+                std::exchange(intr.p,insert_anchor_point(intr.p)),
+                breaks,pt);
+        }
+    } else {
+        for(auto &intr : samples) {
+            follow_balance<Index,Coord>(lpoints,intr.p,breaks,pt);
+        }
     }
 
     /* match all the orphan points to virtual points to make the virtual into

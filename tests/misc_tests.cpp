@@ -34,6 +34,32 @@ void sort_by_size(auto &x) {
     std::ranges::sort(x,{},[](auto &item) { return item.items.size(); });
 }
 
+void for_each_combination(
+    std::span<std::span<const poly_ops::point_t<int>>> input,
+    auto &&fun,
+    std::vector<std::span<const poly_ops::point_t<int>>> &buffer)
+{
+    if(input.empty()) fun(buffer);
+    else {
+        std::vector<std::span<const poly_ops::point_t<int>>> current;
+        current.reserve(input.size()-1);
+        for(std::size_t i=0; i<input.size(); ++i) {
+            current.clear();
+            current.insert(current.end(),input.begin(),input.begin()+long(i));
+            current.insert(current.end(),input.begin()+(long(i)+1),input.end());
+            buffer.push_back(input[i]);
+            for_each_combination(current,fun,buffer);
+            buffer.pop_back();
+        }
+    }
+}
+void for_each_combination(std::span<std::span<const poly_ops::point_t<int>>> input,auto &&fun)
+{
+    std::vector<std::span<const poly_ops::point_t<int>>> buffer;
+    buffer.reserve(input.size());
+    for_each_combination(input,fun,buffer);
+}
+
 int main() {
     using namespace boost::ut;
 
@@ -63,10 +89,13 @@ int main() {
             {230,255}
         }};
 
-        /* This shape should decompose into exactly 10 shapes and 0 holes */
-        auto out = poly_ops::normalize_op<true,int>(loops);
-        expect(out.size() == 10_u);
-        expect(std::ranges::all_of(out,[](auto loop) { return loop.inner_loops().size() == 0; }));
+        std::vector<std::span<const poly_ops::point_t<int>>> current{loops.begin(),loops.end()};
+        for_each_combination(current,[](auto &data) {
+            /* This shape should decompose into exactly 10 shapes and 0 holes */
+            auto out = poly_ops::normalize_op<true,int>(data);
+            expect(out.size() == 10_u);
+            expect(std::ranges::all_of(out,[](auto loop) { return loop.inner_loops().size() == 0; }));
+        });
     };
 
     "Test nesting"_test = [] {
