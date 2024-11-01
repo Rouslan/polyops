@@ -90,7 +90,7 @@ int main() {
         }};
 
         std::vector<std::span<const poly_ops::point_t<int>>> current{loops.begin(),loops.end()};
-        for_each_combination(current,[](auto &data) {
+        for_each_combination(current,[](std::span<std::span<const poly_ops::point_t<int>>> data) {
             /* This shape should decompose into exactly 10 shapes and 0 holes */
             auto out = poly_ops::normalize_op<true,int>(data);
             expect(out.size() == 10_u);
