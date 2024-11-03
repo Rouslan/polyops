@@ -7,7 +7,7 @@ from OpenGL.GL.shaders import compileShader,compileProgram
 from ctypes import c_void_p
 import numpy as np
 
-import poly_ops
+import polyops
 
 COORD_BYTE_SIZE = 4
 POINT_BYTE_SIZE = COORD_BYTE_SIZE * 2
@@ -93,7 +93,7 @@ class Scene:
 
         self.start_time = time.monotonic()
 
-        self.clip = poly_ops.Clipper()
+        self.clip = polyops.Clipper()
 
     def get_current_loops(self,offset):
         offset = np.array(offset,dtype=NP_COORD)
@@ -105,7 +105,7 @@ class Scene:
 
         self.clip.add_loops_clip(loop + offset for loop in self.center_shape)
 
-        return self.clip.execute_flat(poly_ops.BoolOp.union)
+        return self.clip.execute_flat(polyops.BoolOp.union)
 
 class Program:
     def __init__(self):

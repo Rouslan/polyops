@@ -23,7 +23,11 @@ function(cython_module modname fullname cythonfile cppfile)
 
     Python3_add_library(${modname} MODULE WITH_SOABI ${cppfile})
     target_link_libraries(${modname} PRIVATE Python3::Module Python3::NumPy)
-    target_compile_definitions(${modname} PRIVATE NPY_NO_DEPRECATED_API NPY_1_7_API_VERSION)
+    target_compile_definitions(${modname} PRIVATE
+        NPY_NO_DEPRECATED_API
+        NPY_1_7_API_VERSION
+        CYTHON_USE_PYLONG_INTERNALS=0 # don't bloat the binaries with this uneeded optimization
+    )
     target_include_directories(${modname} PRIVATE ${CMAKE_SOURCE_DIR}/include)
 endfunction()
 
@@ -48,6 +52,7 @@ if(Python3_FOUND)
         install(TARGETS polydraw LIBRARY DESTINATION polyops/tests)
         install(FILES
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/btest.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/misc_tests.py
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/__init__.py
             DESTINATION polyops/tests)
 

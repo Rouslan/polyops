@@ -59,6 +59,7 @@ std::chrono::steady_clock::time_point timeout_expiry;
 constexpr long DEFAULT_LOOP_SIZE = 5;
 constexpr long DEFAULT_LOOP_COUNT = 1;
 constexpr long DEFAULT_TEST_COUNT = 1000000;
+constexpr bool DEFAULT_TREE_RESULTS = false;
 
 
 enum class op_type {unset,normalize,offset,union_,all,draw};
@@ -70,8 +71,9 @@ struct settings_t {
     long test_count;
     std::unique_ptr<char[]> failout;
     std::unique_ptr<char[]> datain;
+    bool tree;
 
-    settings_t() : operation(op_type::unset), loop_size(-1), loop_count(-1), timeout(-1), test_count(-1) {}
+    settings_t() : operation(op_type::unset), loop_size(-1), loop_count(-1), timeout(-1), test_count(-1), tree{DEFAULT_TREE_RESULTS} {}
 };
 
 template<typename Coord,typename Index>
@@ -82,16 +84,19 @@ void random_loop(std::mt19937 &rand_gen,std::vector<poly_ops::point_t<Coord>> &l
 }
 
 template<typename Coord,typename Index>
-void do_one(op_type type,std::span<const std::vector<poly_ops::point_t<Coord>>> loops) {
+void do_one(bool tree,op_type type,std::span<const std::vector<poly_ops::point_t<Coord>>> loops) {
     bool all = type == op_type::all;
     if(all || type == op_type::normalize) {
-        poly_ops::normalize_op<false,Coord,Index>(loops);
+        if(tree) poly_ops::normalize_op<true,Coord,Index>(loops);
+        else poly_ops::normalize_op<false,Coord,Index>(loops);
     }
     if(all || type == op_type::union_) {
-        poly_ops::union_op<false,Coord,Index>(loops);
+        if(tree) poly_ops::union_op<true,Coord,Index>(loops);
+        else poly_ops::union_op<false,Coord,Index>(loops);
     }
     if(all || type == op_type::offset) {
-        poly_ops::offset<false,Coord,Index>(loops,50,40);
+        if(tree) poly_ops::offset<true,Coord,Index>(loops,50,40);
+        else poly_ops::offset<false,Coord,Index>(loops,50,40);
     }
     if(type == op_type::draw) {
         poly_ops::draw::rasterizer<Coord> rast;
@@ -142,6 +147,11 @@ OPTIONS:
 -l INTEGER
     A positive integer specifying how many loops to generate for random tests.
     The default is 1. This is ignored if "-d" is specified.
+
+--tree
+    If this flag is given, the operation will be in "tree" mode and generate a
+    hierarchy instead of a flat list. This is ignored if the operation (-o) is
+    "draw".
 )";
     return false;
 }
@@ -223,22 +233,35 @@ bool handle_operation_val(settings_t &settings,char **(&argv),char **end) {
     return parse_fail();
 }
 
+bool unknown_option(const char *opt) {
+    std::cerr << "unknown option \"" << opt << "\"\n\n";
+    return show_help();
+}
+
 bool parse_command_line(settings_t &settings,char **argv,char **end) {
     for(; argv != end; ++argv) {
         switch((*argv)[0]) {
         case '-':
             switch((*argv)[1]) {
             case '-':
-                if((*argv)[2] == 0) {
+                switch((*argv)[2]) {
+                case 'h':
+                    if(strcmp(*argv+3,"elp") != 0) return unknown_option(*argv);
+                    return show_help();
+                case 't':
+                    if(strcmp(*argv+3,"ree") != 0) return unknown_option(*argv);
+                    settings.tree = true;
+                    break;
+                case 0:
                     ++argv;
                     for(; argv != end; ++argv) {
                         if(!handle_pos_val(settings,*argv)) return false;
                     }
                     return true;
+                default:
+                    return unknown_option(*argv);
                 }
-
-                if(strcmp(*argv+2,"help") != 0) return parse_fail();
-                [[fallthrough]];
+                break;
             case 'h':
             case '?':
                 return show_help();
@@ -264,8 +287,7 @@ bool parse_command_line(settings_t &settings,char **argv,char **end) {
                 if(!handle_nonneg_int_val(settings.loop_count,argv,end)) return false;
                 break;
             default:
-                std::cerr << "unknown option \"" << (*argv)[1] << "\"\n\n";
-                return show_help();
+                return unknown_option(*argv);
             }
             break;
         case 0:
@@ -302,7 +324,7 @@ template<typename Coord,typename Index> int run_from_file(const settings_t &sett
 
     try {
         enable_timeout(settings);
-        do_one<Coord,Index>(settings.operation,loops);
+        do_one<Coord,Index>(settings.tree,settings.operation,loops);
     } catch(const test_failure &e) {
         std::cout << e << '\n';
         return 1;
@@ -336,7 +358,7 @@ template<typename Coord,typename Index> int run_random(const settings_t &setting
                 random_loop(rand_gen,loops[j],static_cast<Index>(settings.loop_size));
             }
             enable_timeout(settings);
-            do_one<Coord,Index>(settings.operation,loops);
+            do_one<Coord,Index>(settings.tree,settings.operation,loops);
             ++i;
             if(i > 0 && i % 1000 == 0)
                 std::cout << "completed " << i << " tests\n";

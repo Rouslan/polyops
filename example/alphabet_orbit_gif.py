@@ -2,7 +2,7 @@
 import numpy as np
 from PIL import Image,ImageDraw
 
-import poly_ops
+import polyops
 
 NP_COORD = np.int32
 
@@ -78,7 +78,7 @@ class Scene:
 
         input_loops.extend(loop + offset for loop in self.center_shape)
 
-        return poly_ops.normalize_flat(input_loops)
+        return polyops.normalize_flat(input_loops)
 
 
 def main():

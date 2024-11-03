@@ -1404,7 +1404,7 @@ std::pmr::vector<temp_polygon<Index>*> arrange_loops(
 {
     POLY_OPS_ASSERT(std::ranges::equal(
         ordered_loops | std::views::transform([](auto &item) { return item.p; }),
-        std::ranges::iota_view<Index,Index>(0,loops.size())));
+        std::views::iota(Index(0),Index(loops.size()))));
 
     for(const auto& item : ordered_loops) {
         if(item.hits.empty()) top.push_back(&loops[item.p]);
