@@ -2351,6 +2351,7 @@ void clipper<Coord,Index>::do_op(bool_op op,i_point_tracker<Index> *pt,bool tree
     with the remaining lines */
     for(Index intr : breaks.broken_ends) {
         auto p = end_point(lpoints,intr);
+        POLY_OPS_ASSERT(lpoints[intr].data != p);
         auto os = breaks.broken_starts.find(p);
 
         POLY_OPS_ASSERT(os != breaks.broken_starts.end() && !os->second.empty());
@@ -2365,7 +2366,7 @@ void clipper<Coord,Index>::do_op(bool_op op,i_point_tracker<Index> *pt,bool tree
             for(Index i=1; i<static_cast<Index>(os->second.size()); ++i) {
                 auto p3 = non_anchor_end_point(lpoints,os->second[i]);
                 bool i_left = large_ints::negative(triangle_winding(lpoints[intr].data,p,p3));
-                bool left_of_bs = large_ints::negative(triangle_winding(p,end_point(lpoints,os->second[b_start]),p3));
+                bool left_of_bs = large_ints::negative(triangle_winding(p,non_anchor_end_point(lpoints,os->second[b_start]),p3));
                 if(!(left ? (i_left && left_of_bs) : (i_left || left_of_bs))) {
                     b_start = i;
                     left = i_left;
