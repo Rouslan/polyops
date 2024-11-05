@@ -2,4 +2,4 @@
 # needed by the Github action specified by .github/workflows/documentation.yml.
 
 sphinx
-breathe @ git+https://github.com/Rouslan/breathe.git
+breathe @ git+https://github.com/Rouslan/breathe.git@name-qualification
