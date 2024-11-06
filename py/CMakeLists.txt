@@ -51,8 +51,8 @@ if(Python3_FOUND)
 
         install(TARGETS polydraw LIBRARY DESTINATION polyops/tests)
         install(FILES
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/btest.py
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/misc_tests.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bitmap.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_misc.py
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/__init__.py
             DESTINATION polyops/tests)
 
