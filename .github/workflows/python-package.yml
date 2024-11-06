@@ -25,4 +25,4 @@ jobs:
         pip install ./polyops
     - name: Run Tests
       run: |
-        python -m unittest discover polyops
+        python -m polyops.tests

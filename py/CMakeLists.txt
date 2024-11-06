@@ -53,6 +53,7 @@ if(Python3_FOUND)
         install(FILES
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_bitmap.py
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_misc.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/__main__.py
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/__init__.py
             DESTINATION polyops/tests)
 
