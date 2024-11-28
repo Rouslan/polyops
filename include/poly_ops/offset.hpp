@@ -168,6 +168,8 @@ public:
     template<typename Coord> point_and_origin<Coord,Index> get_value(Index i,const point_t<Coord> &p) const {
         return {p,original_sets[i]};
     }
+
+    void reset() override { original_sets.clear(); }
 };
 
 template<typename Coord,typename Index,typename Input>
@@ -190,50 +192,55 @@ void add_offset_loops(
         thus the first point is added last, after the entire input iterator is
         traversed */
 
-        auto sink = n.add_loop(set,pt);
-        Index orig_i = sink.last_orig_i() + 1;
-        auto itr = std::ranges::begin(input);
-        auto end = std::ranges::end(input);
-        if(itr == end) return;
+        Index orig_i;
+        {
+            auto sink = n.add_loop(set,pt);
+            orig_i = sink.last_orig_i() + 1;
+            auto itr = std::ranges::begin(input);
+            auto end = std::ranges::end(input);
+            if(itr == end) return;
 
-        point_t<Coord> prev2(*itr);
-        ++itr;
-        point_t<Coord> first = prev2;
-
-        point_t<Coord> prev1, second;
-        
-        do {
-            if(itr == end) {
-                /* A size of one can be handled as a special case. The
-                result is a circle around the single point, but for now, we
-                just ignore such "loops". */
-                sink.last_orig_i() = orig_i;
-                return;
-            }
-
-            prev1 = second = *itr;
+            point_t<Coord> prev2(*itr);
             ++itr;
-            second = prev1;
-        } while(prev1 == prev2);
+            point_t<Coord> first = prev2;
 
-        Index orig_i1 = orig_i;
-        for(point_t<Coord> p : std::ranges::subrange(itr,end)) {
-            if(p != prev1) {
-                detail::add_offset_point<Index,Coord>(sink,magnitude,arc_step_size,orig_i,orig_i+1,prev2,prev1,p);
-                prev2 = prev1;
-                prev1 = p;
+            point_t<Coord> prev1, second;
+            
+            do {
+                if(itr == end) {
+                    /* A size of one can be handled as a special case. The
+                    result is a circle around the single point, but for now, we
+                    just ignore such "loops". */
+                    sink.last_orig_i() = orig_i;
+                    return;
+                }
+
+                prev1 = second = *itr;
+                ++itr;
+                second = prev1;
+            } while(prev1 == prev2);
+
+            Index orig_i1 = orig_i;
+            for(point_t<Coord> p : std::ranges::subrange(itr,end)) {
+                if(p != prev1) {
+                    detail::add_offset_point<Index,Coord>(sink,magnitude,arc_step_size,orig_i,orig_i+1,prev2,prev1,p);
+                    prev2 = prev1;
+                    prev1 = p;
+                }
+                ++orig_i;
+            }
+            if(prev2 != prev1) {
+                detail::add_offset_point<Index,Coord>(sink,magnitude,arc_step_size,orig_i,orig_i+1,prev2,prev1,first);
             }
             ++orig_i;
-        }
-        if(prev2 != prev1) {
-            detail::add_offset_point<Index,Coord>(sink,magnitude,arc_step_size,orig_i,orig_i+1,prev2,prev1,first);
-        }
-        ++orig_i;
 
-        if(prev1 != first) {
-            detail::add_offset_point<Index,Coord>(sink,magnitude,arc_step_size,orig_i+1,orig_i1,prev1,first,second);
+            if(prev1 != first) {
+                detail::add_offset_point<Index,Coord>(sink,magnitude,arc_step_size,orig_i,orig_i1,prev1,first,second);
+            }
         }
-        sink.last_orig_i() = orig_i;
+        /* "last_orig_i" shouldn't be changed until "sink" goes out of scope,
+        because it's used in sink's destructor */
+        n.last_orig_i() = orig_i;
     }
 }
 
@@ -329,6 +336,8 @@ offset(
 {
     return offset<TreeOut,Coord,Index,Input,null_tracker<Coord,Index>>(std::forward<Input>(input),magnitude,arc_step_size,{},contig_mem);
 }
+
+template<coordinate Coord,std::integral Index=std::size_t> using origin_tracked_clipper = tclipper<Coord,Index,origin_point_tracker<Index>>;
 
 } // namespace poly_ops
 

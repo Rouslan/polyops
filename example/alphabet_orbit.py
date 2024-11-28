@@ -105,7 +105,7 @@ class Scene:
 
         self.clip.add_loops_clip(loop + offset for loop in self.center_shape)
 
-        return self.clip.execute_flat(polyops.BoolOp.union)
+        return self.clip.execute(polyops.BoolOp.union)
 
 class Program:
     def __init__(self):

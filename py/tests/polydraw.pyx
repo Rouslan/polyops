@@ -53,7 +53,7 @@ cdef extern from *:
         if(PyArray_SIZE(ar) == 0) Py_RETURN_NONE;
 
         try {
-            npy_range itr(ar,NPY_ITER_READONLY | NPY_ITER_REFS_OK,casting);
+            polyops_npy_range itr(ar,NPY_ITER_READONLY | NPY_ITER_REFS_OK,casting);
             if(NPY_UNLIKELY(!itr)) return nullptr;
 
             {

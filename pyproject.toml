@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core","Cython >= 0.29","numpy"]
+requires = ["scikit-build-core","Cython >= 0.29","numpy >= 2"]
 build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
@@ -33,4 +33,4 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
     "Topic :: Scientific/Engineering :: Mathematics"]
-dependencies = ["numpy"]
+dependencies = ["numpy >= 2"]

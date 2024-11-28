@@ -106,6 +106,17 @@ public:
      */
     virtual void points_removed(Index n) = 0;
 
+    /**
+     * Called by any of the "add_loops" functions to reset state.
+     *
+     * After `clipper::execute` is called, the first time an "add_loops"
+     * function is called, `clipper::reset` and this function are automatically
+     * called.
+     *
+     * The free functions (such as `boolean_op`) never call this method.
+     */
+    virtual void reset() = 0;
+
 protected:
     ~i_point_tracker() = default;
 };
@@ -121,11 +132,16 @@ template<typename Coord,typename Index> struct null_tracker_ptr {
     null_tracker<Coord,Index> operator*() const noexcept;
 };
 
+/**
+ * A type that satisfies `point_tracker` but does nothing.
+ */
 template<typename Coord,typename Index> struct null_tracker {
     i_point_tracker<Index> *callbacks() { return nullptr; }
     point_t<Coord> get_value(Index,const point_t<Coord> &p) const { return p; }
 
     null_tracker_ptr<Coord,Index> operator&() const noexcept { return {}; }
+
+    void reset() {}
 };
 
 template<typename Coord,typename Index>
@@ -135,6 +151,7 @@ template<typename T,typename Coord,typename Index> concept point_tracker =
     requires(T val,const T cval,Index i,point_t<Coord> p) {
         { val.callbacks() } -> std::convertible_to<i_point_tracker<Index>*>;
         cval.get_value(i,p);
+        val.reset();
     };
 
 /**
@@ -1567,7 +1584,7 @@ auto make_temp_polygon_tree_range(
         std::move(top),
         [tl=make_tracked_points(std::forward<Tracker>(tracker),std::move(lpoints))]
         (const temp_polygon<Index> *poly) {
-            return temp_polygon_proxy<Coord,Index,Tracker>(tl.lpoints,*poly,tl.tracker());
+            return temp_polygon_proxy<Coord,Index,std::remove_cvref_t<Tracker>>(tl.lpoints,*poly,tl.tracker());
         });
 }
 
@@ -1579,7 +1596,7 @@ auto make_temp_polygon_tree_range(
  */
 template<typename Coord,typename Index=std::size_t,typename Tracker=null_tracker<Coord,Index>> class proto_loop_iterator {
 public:
-    using tracker_ptr = decltype(&std::declval<Tracker&>());
+    using tracker_ptr = decltype(&std::declval<const Tracker&>());
     using value_type = decltype(std::declval<Tracker>().get_value(std::declval<Index>(),std::declval<point_t<Coord>>()));
 
 private:
@@ -1639,8 +1656,10 @@ public:
  */
 template<typename Coord,typename Index,typename Tracker>
 class temp_polygon_proxy : public std::ranges::view_interface<temp_polygon_proxy<Coord,Index,Tracker>> {
+    static_assert(std::same_as<std::remove_cvref_t<Tracker>,Tracker>);
+
 public:
-    using tracker_ptr = decltype(&std::declval<Tracker&>());
+    using tracker_ptr = decltype(&std::declval<const Tracker&>());
 
 private:
     const detail::loop_point<Index,Coord> *lpoints;
@@ -1668,7 +1687,7 @@ public:
 
     /** Return a range representing the children of this polygon. */
     auto inner_loops() const noexcept {
-        return detail::make_temp_polygon_tree_range<Index,Coord,Tracker>(lpoints,data.children,*tracker);
+        return detail::make_temp_polygon_tree_range<Index,Coord>(lpoints,data.children,*tracker);
     }
 };
 
@@ -1692,7 +1711,7 @@ template<typename Index,typename Coord,typename Tracker> auto make_temp_polygon_
         std::move(top),
         [tl=make_tracked_points(std::forward<Tracker>(tracker),std::move(lpoints)),loops=std::move(loops)]
         (const temp_polygon<Index> *poly) {
-            return temp_polygon_proxy<Coord,Index,Tracker>(tl.lpoints.data(),*poly,tl.tracker());
+            return temp_polygon_proxy<Coord,Index,std::remove_cvref_t<Tracker>>(tl.lpoints.data(),*poly,tl.tracker());
         });
 }
 
@@ -1705,7 +1724,7 @@ template<typename Index,typename Coord,typename Tracker> auto make_temp_polygon_
         std::move(loops),
         [tl=make_tracked_points(std::forward<Tracker>(tracker),std::move(lpoints))]
         (const temp_polygon<Index> &poly) {
-            return temp_polygon_proxy<Coord,Index,Tracker>(tl.lpoints.data(),poly,tl.tracker());
+            return temp_polygon_proxy<Coord,Index,std::remove_cvref_t<Tracker>>(tl.lpoints.data(),poly,tl.tracker());
         });
 }
 
@@ -1718,7 +1737,7 @@ template<typename Index,typename Coord,typename Tracker> auto make_temp_polygon_
         loops,
         [tl=make_tracked_points(std::forward<Tracker>(tracker),lpoints.data())]
         (const temp_polygon<Index> &poly) {
-            return temp_polygon_proxy<Coord,Index,Tracker>(tl.lpoints,poly,tl.tracker());
+            return temp_polygon_proxy<Coord,Index,std::remove_cvref_t<Tracker>>(tl.lpoints,poly,tl.tracker());
         });
 }
 
@@ -1761,7 +1780,7 @@ using borrowed_temp_polygon_range = decltype(
  */
 template<typename Coord,typename Index=std::size_t,typename Tracker=null_tracker<Coord,Index>>
 using temp_polygon_tree_range = decltype(
-    detail::make_temp_polygon_tree_range<Index,Coord>({},{},{},std::declval<Tracker>()));
+    detail::make_temp_polygon_tree_range<Index,Coord,Tracker>({},{},{},std::declval<Tracker>()));
 
 /**
  * An opaque type that models `std::ranges::forward_range` and
@@ -1769,7 +1788,7 @@ using temp_polygon_tree_range = decltype(
  */
 template<typename Coord,typename Index=std::size_t,typename Tracker=null_tracker<Coord,Index>>
 using temp_polygon_range = decltype(
-    detail::make_temp_polygon_range<Index,Coord>({},{},std::declval<Tracker>()));
+    detail::make_temp_polygon_range<Index,Coord,Tracker>({},{},std::declval<Tracker>()));
 
 
 /**
@@ -1921,7 +1940,10 @@ public:
      * The output returned by `execute` is invalidated.
      */
     point_sink add_loop(bool_set cat,i_point_tracker<Index> *pt=nullptr) {
-        if(ran) reset();
+        if(ran) {
+            reset();
+            if(pt) pt->reset();
+        }
         return {*this,cat,pt};
     }
 
@@ -1945,7 +1967,7 @@ public:
      * `clipper`. To keep the data, make a copy. The data is also not stored
      * sequentially in memory.
      */
-    template<bool TreeOut,typename Tracker>
+    template<bool TreeOut=false,typename Tracker>
     std::conditional_t<TreeOut,
         borrowed_temp_polygon_tree_range<Coord,Index,Tracker>,
         borrowed_temp_polygon_range<Coord,Index,Tracker>>
@@ -1964,14 +1986,14 @@ public:
      * `clipper`. To keep the data, make a copy. The data is also not stored
      * sequentially in memory.
      */
-    template<bool TreeOut> auto execute(bool_op op) & {
+    template<bool TreeOut=false> auto execute(bool_op op) & {
         return execute<TreeOut,null_tracker<Coord,Index>>(op,{});
     }
 
     /**
      * Perform a boolean operation and return the result.
      */
-    template<bool TreeOut,typename Tracker>
+    template<bool TreeOut=false,typename Tracker>
     std::conditional_t<TreeOut,
         temp_polygon_tree_range<Coord,Index,Tracker>,
         temp_polygon_range<Coord,Index,Tracker>>
@@ -1980,7 +2002,7 @@ public:
     /**
      * Perform a boolean operation and return the result.
      */
-    template<bool TreeOut> auto execute(bool_op op) && {
+    template<bool TreeOut=false> auto execute(bool_op op) && {
         return execute<TreeOut,null_tracker<Coord,Index>>(op,{});
     }
 
@@ -2024,10 +2046,8 @@ clipper<Coord,Index>::point_sink::~point_sink() {
         sweep sets expect line segments with unique indices. */
         std::size_t new_points = n.lpoints.size() - static_cast<std::size_t>(first_i);
         if(new_points < 3) [[unlikely]] {
-            while(new_points-- > 0) {
-                if(pt) pt->points_removed(static_cast<Index>(new_points));
-                n.lpoints.pop_back();
-            }
+            if(pt) pt->points_removed(static_cast<Index>(new_points - 1));
+            while(new_points-- > 0) n.lpoints.pop_back();
         } else {
             n.lpoints.back().next = first_i;
             n.lpoints.back().state() = detail::line_state::check;
@@ -2301,10 +2321,6 @@ void clipper<Coord,Index>::do_op(bool_op op,i_point_tracker<Index> *pt,bool tree
     self_intersection(pt);
     calc_line_bal(op);
 
-    /* replace the points in "hits" of each sample, with anchor points
-
-    TODO: add test to make sure this doesn't mess things up do due the order of
-    overlapping line segments changing in the next few steps */
     if(tree_out) {
         for(auto &intr : samples) {
             for(Index &i : intr.hits) i = insert_anchor_point(i);
@@ -2405,7 +2421,10 @@ std::conditional_t<TreeOut,
     borrowed_temp_polygon_tree_range<Coord,Index,Tracker>,
     borrowed_temp_polygon_range<Coord,Index,Tracker>>
 clipper<Coord,Index>::execute(bool_op op,Tracker &&tracker) & {
-    if(ran) reset();
+    if(ran) {
+        reset();
+        tracker.reset();
+    }
 
     do_op(op,tracker.callbacks(),TreeOut);
 
@@ -2423,7 +2442,10 @@ std::conditional_t<TreeOut,
     temp_polygon_tree_range<Coord,Index,Tracker>,
     temp_polygon_range<Coord,Index,Tracker>>
 clipper<Coord,Index>::execute(bool_op op,Tracker &&tracker) && {
-    if(ran) reset();
+    if(ran) {
+        reset();
+        tracker.reset();
+    }
 
     do_op(op,tracker.callbacks(),TreeOut);
 
@@ -2447,6 +2469,7 @@ void clipper<Coord,Index>::reset() {
     lpoints.clear();
     samples.clear();
     sweep_nodes.resize(1);
+    original_i = static_cast<Index>(-1);
     ran = false;
 }
 
@@ -2499,14 +2522,17 @@ public:
     }
 
     /**
-     * Calls `base.reset()`
+     * Calls `base.reset()` and 'tracker.reset()`
      */
-    void reset() { base.reset(); }
+    void reset() {
+        base.reset();
+        tracker.reset();
+    }
 
     /**
      * Calls `base.template execute<TreeOut,Tracker&>(op,tracker)`
      */
-    template<bool TreeOut>
+    template<bool TreeOut=false>
     std::conditional_t<TreeOut,
         borrowed_temp_polygon_tree_range<Coord,Index,Tracker&>,
         borrowed_temp_polygon_range<Coord,Index,Tracker&>>
@@ -2515,7 +2541,7 @@ public:
     /**
      * Calls `std::move(base).template execute<TreeOut,Tracker>(op,std::forward<Tracker>(tracker))`
      */
-    template<bool TreeOut>
+    template<bool TreeOut=false>
     std::conditional_t<TreeOut,
         temp_polygon_tree_range<Coord,Index,Tracker>,
         temp_polygon_range<Coord,Index,Tracker>>

@@ -1,11 +1,73 @@
 #include <vector>
 #include <algorithm>
+#include <ostream>
+#include <numbers>
 
 #define BOOST_UT_DISABLE_MODULE
 #include "third_party/boost/ut.hpp"
 
 #include "../include/poly_ops/poly_ops.hpp"
 
+
+namespace poly_ops {
+    template<typename T> std::ostream &operator<<(std::ostream &os,const point_t<T> &p) {
+        return os << '{' << p.x() << ',' << p.y() << '}';
+    }
+}
+
+template<typename R> struct any_range {
+    R val;
+};
+template<typename R> any_range(R&&) -> any_range<R>;
+template<typename T,std::size_t N> any_range(T (&)[N]) -> any_range<std::span<T>>;
+template<typename R1,typename R2> bool operator==(any_range<R1> a,any_range<R2> b) {
+    return std::ranges::equal(a.val,b.val);
+}
+template<typename R> std::ostream &operator<<(std::ostream &os,const any_range<R> &p) {
+    os << '{';
+    bool first = true;
+    for(auto &&item : p.val) {
+        if(!first) os << ',';
+        first = false;
+        os << item;
+    }
+    return os << '}';
+}
+
+template<typename R1,typename R2> auto expect_range_eq(R1 &&a,R2 &&b,std::source_location loc=std::source_location::current()) {
+    return boost::ut::expect(boost::ut::eq(any_range{a},any_range{b}),loc);
+}
+
+template<typename T,typename U> bool point_approx_equal(poly_ops::point_t<T> a,poly_ops::point_t<U> b,double delta) {
+    return std::abs(a.x() - b.x()) <= delta && std::abs(a.y() - b.y()) < delta;
+}
+
+template<typename T> struct point_with_delta {
+    poly_ops::point_t<T> p;
+    double delta;
+};
+template<typename T,typename U> bool operator==(const point_with_delta<T> &a,poly_ops::point_t<U> b) {
+    return point_approx_equal(a.p,b,a.delta);
+}
+template<typename R> std::ostream &operator<<(std::ostream &os,const point_with_delta<R> &p) {
+    return os << p.p;
+}
+
+template<typename T,typename U> auto expect_range_eq(poly_ops::point_t<T> a,poly_ops::point_t<U> b,double delta,std::source_location loc=std::source_location::current()) {
+    return boost::ut::expect(boost::ut::eq(point_with_delta{a,delta},b),loc);
+}
+
+struct p {
+    int x;
+    int y;
+
+    friend auto operator==(poly_ops::point_t<int> a,p b) {
+        return boost::ut::eq(a,poly_ops::point_t{b.x,b.y});
+    }
+    friend auto operator==(p a,poly_ops::point_t<int> b) {
+        return boost::ut::eq(poly_ops::point_t{a.x,a.y},b);
+    }
+};
 
 struct point_array_tree {
     std::vector<poly_ops::point_t<int>> items;
@@ -62,9 +124,10 @@ void for_each_combination(std::span<std::span<const poly_ops::point_t<int>>> inp
 
 int main() {
     using namespace boost::ut;
+    using loop_t = std::vector<poly_ops::point_t<int>>;
 
     "Test decomposition"_test = [] {
-        std::vector<std::vector<poly_ops::point_t<int>>> loops{{
+        std::vector<loop_t> loops{{
             {280,220},{249,215},{221,200},{199,178},{184,150},{180,119},
             {184,89},{199,61},{221,39},{249,24},{280,19},{310,24},{338,39},
             {360,61},{375,89},{380,119},{375,150},{360,178},{338,200},{310,215}
@@ -99,7 +162,7 @@ int main() {
     };
 
     "Test nesting"_test = [] {
-        std::vector<std::vector<poly_ops::point_t<int>>> loops{{
+        std::vector<loop_t> loops{{
             { 20, 20},{157, 43},{256, 17},{338, 30},{356, 89},{363,189},
             {130,204},{ 14,185},{ 36, 95}
         },{
@@ -118,24 +181,177 @@ int main() {
         }};
 
         auto out = make_array_trees(poly_ops::normalize_op<true,int>(loops));
-        expect(out.size() == 1_u);
+        expect(fatal(out.size() == 1_u));
         expect(out[0].size() == 9_u);
+        expect(fatal(out[0].inner_loops.size() == 3_u));
         sort_by_size(out[0].inner_loops);
 
         expect(out[0].inner_loops[0].size() == 3_u);
         expect(out[0].inner_loops[0].inner_loops.size() == 0_u);
 
         expect(out[0].inner_loops[1].size() == 7_u);
-        expect(out[0].inner_loops[1].inner_loops.size() == 1_u);
+        expect(fatal(out[0].inner_loops[1].inner_loops.size() == 1_u));
         expect(out[0].inner_loops[1].inner_loops[0].size() == 5_u);
         expect(out[0].inner_loops[1].inner_loops[0].inner_loops.size() == 0_u);
 
         expect(out[0].inner_loops[2].size() == 8_u);
-        expect(out[0].inner_loops[2].inner_loops.size() == 1_u);
+        expect(fatal(out[0].inner_loops[2].inner_loops.size() == 1_u));
         expect(out[0].inner_loops[2].inner_loops[0].size() == 6_u);
-        expect(out[0].inner_loops[2].inner_loops[0].inner_loops.size() == 1_u);
+        expect(fatal(out[0].inner_loops[2].inner_loops[0].inner_loops.size() == 1_u));
         expect(out[0].inner_loops[2].inner_loops[0].inner_loops[0].size() == 4_u);
         expect(out[0].inner_loops[2].inner_loops[0].inner_loops[0].inner_loops.size() == 0_u);
+    };
+
+    "Test basic offset"_test = [] {
+        loop_t box = {{0,0},{1000,0},{1000,1000},{0,1000}};
+        auto result = poly_ops::offset<false,int>(box,50,1000000,poly_ops::origin_point_tracker{});
+        expect(fatal(result.size() == 1_u));
+        expect(fatal(result[0u].size() == 8_u));
+
+        std::vector<poly_ops::point_and_origin<int>> box2{result[0u].begin(),result[0u].end()};
+
+        // rotate until {-50,0} is the first point
+        auto itr = std::ranges::find(box2,poly_ops::point_t{-50,0},[](auto &x) { return x.p; });
+        expect(fatal(itr != box2.end()));
+        std::ranges::rotate(box2,itr);
+
+        std::size_t o1[] = {0};
+        std::size_t o2[] = {1};
+        std::size_t o3[] = {2};
+        std::size_t o4[] = {3};
+        expect_range_eq(box2[0].original_points,o1);
+        expect(box2[1].p == poly_ops::point_t{0,-50});
+        expect_range_eq(box2[1].original_points,o1);
+
+        expect(box2[2].p == poly_ops::point_t{1000,-50});
+        expect_range_eq(box2[2].original_points,o2);
+        expect(box2[3].p == poly_ops::point_t{1050,0});
+        expect_range_eq(box2[3].original_points,o2);
+
+        expect(box2[4].p == poly_ops::point_t{1050,1000});
+        expect_range_eq(box2[4].original_points,o3);
+        expect(box2[5].p == poly_ops::point_t{1000,1050});
+        expect_range_eq(box2[5].original_points,o3);
+
+        expect(box2[6].p == poly_ops::point_t{0,1050});
+        expect_range_eq(box2[6].original_points,o4);
+        expect(box2[7].p == poly_ops::point_t{-50,1000});
+        expect_range_eq(box2[7].original_points,o4);
+    };
+
+    "Test compound offset"_test = [] {
+        std::vector<loop_t> boxes = {
+            {{0,0},{1000,0},{1000,1000},{0,1000}},
+            {{2000,0},{3000,0},{3000,1000},{2000,1000}},
+            {{4000,0},{5000,0},{5000,1000},{4000,1000}}};
+        auto result = poly_ops::offset<false,int>(boxes,50,1000000,poly_ops::origin_point_tracker{});
+        expect(fatal(result.size() == 3_u));
+
+        for(std::size_t i=0; i<3; ++i) {
+            int x_offset = int(i)*2000;
+            std::size_t index_offset = i*4;
+            expect(fatal(result[i].size() == 8_u));
+
+            std::vector<poly_ops::point_and_origin<int>> box2{result[i].begin(),result[i].end()};
+
+            // rotate until {-50,0} is the first point
+            auto itr = std::ranges::find(box2,poly_ops::point_t{-50+x_offset,0},[](auto &x) { return x.p; });
+            expect(fatal(itr != box2.end()));
+            std::ranges::rotate(box2,itr);
+
+            std::size_t o1[] = {index_offset+0};
+            std::size_t o2[] = {index_offset+1};
+            std::size_t o3[] = {index_offset+2};
+            std::size_t o4[] = {index_offset+3};
+            expect_range_eq(box2[0].original_points,o1);
+            expect(box2[1].p == p{x_offset,-50});
+            expect_range_eq(box2[1].original_points,o1);
+
+            expect(box2[2].p == p{1000+x_offset,-50});
+            expect_range_eq(box2[2].original_points,o2);
+            expect(box2[3].p == p{1050+x_offset,0});
+            expect_range_eq(box2[3].original_points,o2);
+
+            expect(box2[4].p == p{1050+x_offset,1000});
+            expect_range_eq(box2[4].original_points,o3);
+            expect(box2[5].p == p{1000+x_offset,1050});
+            expect_range_eq(box2[5].original_points,o3);
+
+            expect(box2[6].p == p{x_offset,1050});
+            expect_range_eq(box2[6].original_points,o4);
+            expect(box2[7].p == p{-50+x_offset,1000});
+            expect_range_eq(box2[7].original_points,o4);
+        }
+    };
+
+    poly_ops::origin_tracked_clipper<int> tclipper;
+
+    "Test offset curves"_test = [](auto values) {
+        struct point_meta {
+            double angle;
+            poly_ops::point_t<double> curve_start;
+            poly_ops::point_t<double> curve_end;
+            std::size_t segments;
+        };
+
+        auto &&[loop,offset_amount,arc_step_size,tclipper] = values;
+
+        std::size_t total_points = loop.size();
+
+        std::vector<point_meta> meta{loop.size()};
+        std::size_t prev_i = loop.size() - 1;
+        for(std::size_t i=0; i<loop.size(); ++i) {
+            auto &m = meta[i];
+            m.angle = std::numbers::pi - poly_ops::vangle<int>(loop[prev_i] - loop[i],loop[(i+1)%loop.size()] - loop[i]);
+            m.curve_start = poly_ops::perp_vector<int>(loop[prev_i],loop[i],offset_amount) + loop[i];
+            m.curve_end = poly_ops::perp_vector<int>(loop[i],loop[(i+1)%loop.size()],offset_amount) + loop[i];
+            m.segments = std::max(std::size_t(m.angle * offset_amount / arc_step_size),std::size_t(1));
+
+            total_points += m.segments;
+            prev_i = i;
+        }
+
+        std::vector<poly_ops::point_and_origin<int>> box2;
+
+        /* box2 will reference data in this object (if tclipper is nullptr) */
+        poly_ops::origin_point_tracker tracker{};
+
+        if(tclipper) {
+            poly_ops::add_offset_loops_subject(*tclipper,loop,offset_amount,arc_step_size);
+            auto result = tclipper->execute(poly_ops::bool_op::union_);
+            expect(fatal(result.size() == 1_u));
+            box2.insert(box2.end(),result[0u].begin(),result[0u].end());
+        } else {
+            auto result = poly_ops::offset<false,int>(loop,offset_amount,arc_step_size,tracker);
+            expect(fatal(result.size() == 1_u));
+            box2.insert(box2.end(),result[0u].begin(),result[0u].end());
+        }
+        expect(fatal(eq(box2.size(),total_points)));
+
+        std::size_t i = 0;
+        for(;; ++i) {
+            expect(fatal(lt(i,box2.size())));
+            if(point_approx_equal(box2[i].p,meta[0].curve_start,1.0)) break;
+        }
+
+        for(std::size_t k=0; k<loop.size(); ++k) {
+            auto &m = meta[k];
+            expect_range_eq(box2[i].p,m.curve_start,1.0);
+            for(std::size_t j=0; j<m.segments+1; ++j) {
+                prev_i = i;
+                auto target_op = {k};
+                expect_range_eq(box2[i].original_points,target_op);
+                i = (i+1) % total_points;
+            }
+            expect_range_eq(box2[prev_i].p,m.curve_end,1.0);
+        }
+    } | std::vector<std::tuple<loop_t,double,int,poly_ops::origin_tracked_clipper<int>*>>{
+        {loop_t{{0,0},{1000,0},{1000,1000},{0,1000}},50.0,10,nullptr},
+        {loop_t{{3225,-3225},{5450,-13525},{16000,-15450},{8025,-1575}},2000.0,100,nullptr},
+        {loop_t{{20,20},{140,35},{37,142},{20,100}},20.0,15,nullptr},
+        {loop_t{{0,0},{1000,0},{1000,1000},{0,1000}},50.0,10,&tclipper},
+        {loop_t{{3225,-3225},{5450,-13525},{16000,-15450},{8025,-1575}},2000.0,100,&tclipper},
+        {loop_t{{20,20},{140,35},{37,142},{20,100}},20.0,15,&tclipper}
     };
 
     return 0;

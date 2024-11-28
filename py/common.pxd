@@ -14,7 +14,7 @@ cdef extern from *:
 
     struct npy_point_iterator;
 
-    struct npy_range {
+    struct polyops_npy_range {
         NpyIter *itr;
         NpyIter_IterNextFunc *itr_next;
         char **data_ptr;
@@ -25,7 +25,7 @@ cdef extern from *:
         npy_intp stride;
         const char *run_end;
 
-        npy_range(PyArrayObject *ar,int flag,NPY_CASTING casting) noexcept : itr{nullptr}, itr_next{nullptr}
+        polyops_npy_range(PyArrayObject *ar,int flag,NPY_CASTING casting) noexcept : itr{nullptr}, itr_next{nullptr}
         {
             auto dtype = PyArray_DescrFromType(COORD_T_NPY);
             if(NPY_UNLIKELY(!dtype)) return;
@@ -47,10 +47,10 @@ cdef extern from *:
 
             read_pointers();
         }
-        npy_range(const npy_range&) = delete;
-        ~npy_range() { if(itr) NpyIter_Deallocate(itr); }
+        polyops_npy_range(const polyops_npy_range&) = delete;
+        ~polyops_npy_range() { if(itr) NpyIter_Deallocate(itr); }
 
-        npy_range &operator=(const npy_range&) = delete;
+        polyops_npy_range &operator=(const polyops_npy_range&) = delete;
 
         explicit operator bool() const {
             return itr_next != nullptr;
@@ -71,7 +71,7 @@ cdef extern from *:
     };
 
     struct npy_point_proxy {
-        npy_range *range;
+        polyops_npy_range *range;
 
         coord_t &operator[](npy_intp i) const noexcept {
             assert((range->data + i*range->stride) != range->run_end);
@@ -97,7 +97,7 @@ cdef extern from *:
         using difference_type = std::ptrdiff_t;
 
         npy_point_iterator() noexcept = default;
-        explicit npy_point_iterator(npy_range *range) : npy_point_proxy{range} {}
+        explicit npy_point_iterator(polyops_npy_range *range) : npy_point_proxy{range} {}
         npy_point_iterator(const npy_point_iterator&) noexcept = default;
     
         npy_point_iterator &operator++() noexcept {
@@ -126,7 +126,7 @@ cdef extern from *:
         }
     };
 
-    npy_point_iterator npy_range::begin() noexcept {
+    npy_point_iterator polyops_npy_range::begin() noexcept {
         return npy_point_iterator{this};
     }
 

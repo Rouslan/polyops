@@ -199,6 +199,26 @@ class DrawEventPrinter:
         except Exception as e:
             return str(e)
 
+class MiniFlatSetPrinter:
+    """Print a poly_ops::detail::mini_flat_set instance"""
+    def __init__(self,val):
+        self.val = val
+    
+    def to_string(self):
+        try:
+            size = self.val['_size']
+            items = []
+            if size == 1:
+                items.append(str(self.val['u']['item']))
+            elif size > 0:
+                data = self.val['u']['data'].dereference()['itmes']
+                for i in range(size):
+                    items.append(str(data[i]))
+            
+            return '{%s}' % ','.join(items)
+        except Exception as e:
+            return str(e)
+
 def build_pretty_printer():
     pp = gdb.printing.RegexpCollectionPrettyPrinter('polyops')
     pp.add_printer('point_t','^poly_ops::point_t<.*>$',PointPrinter)
@@ -207,4 +227,5 @@ def build_pretty_printer():
     pp.add_printer('cached_segment','^poly_ops(::draw)?::detail::cached_segment<.*>$',CachedSegmentPrinter)
     pp.add_printer('compound_xint','^poly_ops::large_ints::compound_xint<.*>$',CompoundIntPrinter)
     pp.add_printer('draw_event','^poly_ops::draw::detail::event<.*>$',DrawEventPrinter)
+    pp.add_printer('mini_flat_set','^poly_ops::detail::mini_flat_set<.*>$',MiniFlatSetPrinter)
     return pp

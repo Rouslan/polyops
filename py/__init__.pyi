@@ -1,109 +1,294 @@
 import enum
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple, overload, SupportsInt
 from collections.abc import Iterable
 import numpy as np
 from numpy.typing import ArrayLike, DTypeLike
 
-PointArray = np.ndarray[Any,np.dtype[np.int32]]
-LoopTree = tuple[tuple[PointArray,'LoopTree'],...]
+PointArrayLike = ArrayLike
+PointArray = np.ndarray
+IndexArray = np.ndarray[Any,np.dtype[np.intp]]
 CastingKind = Literal["no","equiv","safe","same_kind","unsafe"]
 
-class BoolOp(enum.Enum):
+class PointMap:
+    offsets: IndexArray
+    indices: IndexArray
+
+    def __len__(self) -> int: ...
+    def __getitem__(self,i: SupportsInt, /) -> IndexArray: ...
+
+    def index_map(self,out: IndexArray|None = ...) -> IndexArray: ...
+
+# the real TrackedLoop is actually created with collections.namedtuple
+class TrackedLoop(NamedTuple):
+    loop: PointArray
+    originals: PointMap
+
+# the real RecursiveLoop is actually created with collections.namedtuple
+class RecursiveLoop(NamedTuple):
+    loop: PointArray
+    children: tuple[RecursiveLoop,...]
+
+# the real TrackedRecursiveLoop is actually created with collections.namedtuple
+class TrackedRecursiveLoop(NamedTuple):
+    loop: PointArray
+    children: tuple[TrackedRecursiveLoop,...]
+    originals: PointMap
+
+class BoolOp(enum.IntEnum):
     union = ...
     intersection = ...
     xor = ...
     difference = ...
     normalize = ...
 
-class BoolSet(enum.Enum):
+class BoolSet(enum.IntEnum):
     subject = ...
     clip = ...
 
-def union_tree(
-    loops: Iterable[ArrayLike],
+@overload
+def union(
+    loops: Iterable[PointArrayLike],
     *,
     casting: CastingKind = ...,
-    dtype: DTypeLike = ...) -> LoopTree: ...
+    dtype: DTypeLike = ...,
+    tree_out: Literal[False]=False,
+    track_points: Literal[False]=False) -> tuple[PointArray,...]: ...
 
-def union_flat(
-    loops: Iterable[ArrayLike],
+@overload
+def union(
+    loops: Iterable[PointArrayLike],
     *,
     casting: CastingKind = ...,
-    dtype: DTypeLike = ...) -> tuple[PointArray,...]: ...
+    dtype: DTypeLike = ...,
+    tree_out: Literal[True]=...,
+    track_points: Literal[False]=False) -> tuple[RecursiveLoop,...]: ...
 
-def normalize_tree(
-    loops: Iterable[ArrayLike],
+@overload
+def union(
+    loops: Iterable[PointArrayLike],
     *,
     casting: CastingKind = ...,
-    dtype: DTypeLike = ...) -> LoopTree: ...
+    dtype: DTypeLike = ...,
+    tree_out: Literal[False]=False,
+    track_points: Literal[True]=...) -> tuple[TrackedLoop,...]: ...
 
-def normalize_flat(
-    loops: Iterable[ArrayLike],
+@overload
+def union(
+    loops: Iterable[PointArrayLike],
     *,
     casting: CastingKind = ...,
-    dtype: DTypeLike = ...) -> tuple[PointArray,...]: ...
+    dtype: DTypeLike = ...,
+    tree_out: Literal[True]=...,
+    track_points: Literal[True]=...) -> tuple[TrackedRecursiveLoop,...]: ...
 
-def boolean_op_tree(
-    subject: Iterable[ArrayLike],
-    clip: Iterable[ArrayLike],
+@overload
+def normalize(
+    loops: Iterable[PointArrayLike],
+    *,
+    casting: CastingKind = ...,
+    dtype: DTypeLike = ...,
+    tree_out: Literal[False]=False,
+    track_points: Literal[False]=False) -> tuple[PointArray,...]: ...
+
+@overload
+def normalize(
+    loops: Iterable[PointArrayLike],
+    *,
+    casting: CastingKind = ...,
+    dtype: DTypeLike = ...,
+    tree_out: Literal[True]=...,
+    track_points: Literal[False]=False) -> tuple[RecursiveLoop,...]: ...
+
+@overload
+def normalize(
+    loops: Iterable[PointArrayLike],
+    *,
+    casting: CastingKind = ...,
+    dtype: DTypeLike = ...,
+    tree_out: Literal[False]=False,
+    track_points: Literal[True]=...) -> tuple[TrackedLoop,...]: ...
+
+@overload
+def normalize(
+    loops: Iterable[PointArrayLike],
+    *,
+    casting: CastingKind = ...,
+    dtype: DTypeLike = ...,
+    tree_out: Literal[True]=...,
+    track_points: Literal[True]=...) -> tuple[TrackedRecursiveLoop,...]: ...
+
+@overload
+def boolean_op(
+    subject: Iterable[PointArrayLike],
+    clip: Iterable[PointArrayLike],
     op: BoolOp,
     *,
     casting: CastingKind = ...,
-    dtype: DTypeLike = ...) -> LoopTree: ...
+    dtype: DTypeLike = ...,
+    tree_out: Literal[False]=False,
+    track_points: Literal[False]=False) -> tuple[PointArray,...]: ...
 
-def boolean_op_flat(
-    loops: Iterable[ArrayLike],
-    clip: Iterable[ArrayLike],
+@overload
+def boolean_op(
+    subject: Iterable[PointArrayLike],
+    clip: Iterable[PointArrayLike],
     op: BoolOp,
     *,
     casting: CastingKind = ...,
-    dtype: DTypeLike = ...) -> tuple[PointArray,...]: ...
+    dtype: DTypeLike = ...,
+    tree_out: Literal[False]=False,
+    track_points: Literal[True]=...) -> tuple[TrackedLoop,...]: ...
 
-def offset_tree(
-    loops: Iterable[ArrayLike],
+@overload
+def boolean_op(
+    subject: Iterable[PointArrayLike],
+    clip: Iterable[PointArrayLike],
+    op: BoolOp,
+    *,
+    casting: CastingKind = ...,
+    dtype: DTypeLike = ...,
+    tree_out: Literal[True]=...,
+    track_points: Literal[False]=False) -> tuple[RecursiveLoop,...]: ...
+
+@overload
+def boolean_op(
+    subject: Iterable[PointArrayLike],
+    clip: Iterable[PointArrayLike],
+    op: BoolOp,
+    *,
+    casting: CastingKind = ...,
+    dtype: DTypeLike = ...,
+    tree_out: Literal[True]=...,
+    track_points: Literal[True]=...) -> tuple[TrackedRecursiveLoop, ...]: ...
+
+@overload
+def offset(
+    loops: Iterable[PointArrayLike],
     magnitude: float,
     arc_step_size: int,
     *,
     casting: CastingKind = ...,
-    dtype: DTypeLike = ...) -> LoopTree: ...
+    dtype: DTypeLike = ...,
+    tree_out: Literal[False]=False,
+    track_points: Literal[False]=False) -> tuple[PointArray,...]: ...
 
-def offset_flat(
-    loops: Iterable[ArrayLike],
+@overload
+def offset(
+    loops: Iterable[PointArrayLike],
     magnitude: float,
     arc_step_size: int,
     *,
     casting: CastingKind = ...,
-    dtype: DTypeLike = ...) -> tuple[PointArray,...]: ...
+    dtype: DTypeLike = ...,
+    tree_out: Literal[False]=False,
+    track_points: Literal[True]=...) -> tuple[TrackedLoop,...]: ...
 
-def winding_dir(loop: ArrayLike,*,casting: CastingKind = ...) -> int: ...
+@overload
+def offset(
+    loops: Iterable[PointArrayLike],
+    magnitude: float,
+    arc_step_size: int,
+    *,
+    casting: CastingKind = ...,
+    dtype: DTypeLike = ...,
+    tree_out: Literal[True]=...,
+    track_points: Literal[False]=False) -> tuple[RecursiveLoop,...]: ...
+
+@overload
+def offset(
+    loops: Iterable[PointArrayLike],
+    magnitude: float,
+    arc_step_size: int,
+    *,
+    casting: CastingKind = ...,
+    dtype: DTypeLike = ...,
+    tree_out: Literal[True]=...,
+    track_points: Literal[True]=...) -> tuple[TrackedRecursiveLoop, ...]: ...
+
+def winding_dir(loop: PointArrayLike,*,casting: CastingKind = ...) -> int: ...
 
 class Clipper:
-    def add_loop(self,loop: ArrayLike,bset: BoolSet,*,casting: CastingKind = ...) -> None: ...
+    def add_loop(self,loop: PointArrayLike,bset: BoolSet,*,casting: CastingKind = ...) -> None: ...
 
-    def add_loop_subject(self,loop: ArrayLike,*,casting: CastingKind = ...) -> None: ...
+    def add_loop_subject(self,loop: PointArrayLike,*,casting: CastingKind = ...) -> None: ...
 
-    def add_loop_clip(self,loop: ArrayLike,*,casting: CastingKind = ...) -> None: ...
+    def add_loop_clip(self,loop: PointArrayLike,*,casting: CastingKind = ...) -> None: ...
 
-    def add_loops(self,loops: Iterable[ArrayLike],bset: BoolSet,*,casting: CastingKind = ...) -> None: ...
+    def add_loops(self,loops: Iterable[PointArrayLike],bset: BoolSet,*,casting: CastingKind = ...) -> None: ...
 
-    def add_loops_subject(self,loops: Iterable[ArrayLike],*,casting: CastingKind = ...) -> None: ...
+    def add_loops_subject(self,loops: Iterable[PointArrayLike],*,casting: CastingKind = ...) -> None: ...
 
-    def add_loops_clip(self,loops: Iterable[ArrayLike],*,casting: CastingKind = ...) -> None: ...
+    def add_loops_clip(self,loops: Iterable[PointArrayLike],*,casting: CastingKind = ...) -> None: ...
 
-    def add_loop_offset(self,loop: ArrayLike,bset: BoolSet,magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
+    def add_loop_offset(self,loop: PointArrayLike,bset: BoolSet,magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
 
-    def add_loop_offset_subject(self,loop: ArrayLike,magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
+    def add_loop_offset_subject(self,loop: PointArrayLike,magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
 
-    def add_loop_offset_clip(self,loop: ArrayLike,magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
+    def add_loop_offset_clip(self,loop: PointArrayLike,magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
 
-    def add_loops_offset(self,loops: Iterable[ArrayLike],bset: BoolSet,magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
+    def add_loops_offset(self,loops: Iterable[PointArrayLike],bset: BoolSet,magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
 
-    def add_loops_offset_subject(self,loops: Iterable[ArrayLike],magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
+    def add_loops_offset_subject(self,loops: Iterable[PointArrayLike],magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
 
-    def add_loops_offset_clip(self,loops: Iterable[ArrayLike],magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
+    def add_loops_offset_clip(self,loops: Iterable[PointArrayLike],magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
 
-    def execute_tree(self,op: BoolOp,*,dtype: DTypeLike = ...) -> LoopTree: ...
+    @overload
+    def execute(
+        self,
+        op: BoolOp,
+        *,
+        dtype: DTypeLike = ...,
+        tree_out: Literal[False]=False) -> tuple[PointArray,...]: ...
+    
+    @overload
+    def execute(
+        self,
+        op: BoolOp,
+        *,
+        dtype: DTypeLike = ...,
+        tree_out: Literal[True]=...) -> tuple[RecursiveLoop,...]: ...
 
-    def execute_flat(self,op: BoolOp,*,dtype: DTypeLike = ...) -> tuple[PointArray,...]: ...
+    def reset(self) -> None: ...
+
+class TrackedClipper:
+    def add_loop(self,loop: PointArrayLike,bset: BoolSet,*,casting: CastingKind = ...) -> None: ...
+
+    def add_loop_subject(self,loop: PointArrayLike,*,casting: CastingKind = ...) -> None: ...
+
+    def add_loop_clip(self,loop: PointArrayLike,*,casting: CastingKind = ...) -> None: ...
+
+    def add_loops(self,loops: Iterable[PointArrayLike],bset: BoolSet,*,casting: CastingKind = ...) -> None: ...
+
+    def add_loops_subject(self,loops: Iterable[PointArrayLike],*,casting: CastingKind = ...) -> None: ...
+
+    def add_loops_clip(self,loops: Iterable[PointArrayLike],*,casting: CastingKind = ...) -> None: ...
+
+    def add_loop_offset(self,loop: PointArrayLike,bset: BoolSet,magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
+
+    def add_loop_offset_subject(self,loop: PointArrayLike,magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
+
+    def add_loop_offset_clip(self,loop: PointArrayLike,magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
+
+    def add_loops_offset(self,loops: Iterable[PointArrayLike],bset: BoolSet,magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
+
+    def add_loops_offset_subject(self,loops: Iterable[PointArrayLike],magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
+
+    def add_loops_offset_clip(self,loops: Iterable[PointArrayLike],magnitude: float,arc_step_size: int,*,casting: CastingKind = ...) -> None: ...
+
+    @overload
+    def execute(
+        self,
+        op: BoolOp,
+        *,
+        dtype: DTypeLike = ...,
+        tree_out: Literal[False]=False) -> tuple[TrackedLoop,...]: ...
+    
+    @overload
+    def execute(
+        self,
+        op: BoolOp,
+        *,
+        dtype: DTypeLike = ...,
+        tree_out: Literal[True]=...) -> tuple[TrackedRecursiveLoop,...]: ...
 
     def reset(self) -> None: ...

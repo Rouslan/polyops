@@ -1,37 +1,140 @@
-poly_ops module
+polyops module
 ==================
 
-.. py:module:: poly_ops
+.. py:module:: polyops
 
 
-.. py:data:: PointArray
-    :value: np.ndarray
+.. py:type:: PointArrayLike
+    :canonical: numpy.typing.ArrayLike
 
     Arrays of this type must have a shape with a length of two, with the second
     dimension being two. In other words: it must be an array of two dimensional
-    arrays. This requirement is currently not enforced by the typing system, but
-    functions that expect this type will throw an instance of `TypeError` if the
-    requirement is not met.
+    arrays.
 
     .. important::
 
         This type alias only exists in the stub file.
 
 
-.. py:data:: LoopTree
-    :value: tuple[tuple[PointArray,LoopTree],...]
+.. py:type:: PointArray
+    :canonical: numpy.ndarray
+
+    An array with a shape with a length of two, with the second dimension being
+    two. In other words: an array of two dimensional arrays.
 
     .. important::
 
         This type alias only exists in the stub file.
 
 
-.. py:data:: CastingKind
-    :value: Literal["no","equiv","safe","same_kind","unsafe"]
+.. py:type:: IndexArray
+    :canonical: numpy.ndarray[Any,np.dtype[np.intp]]
+
+    A one-dimensional array of integers.
 
     .. important::
 
         This type alias only exists in the stub file.
+
+
+.. py:type:: CastingKind
+    :canonical: Literal["no","equiv","safe","same_kind","unsafe"]
+
+    .. important::
+
+        This type alias only exists in the stub file.
+
+
+.. py:class:: PointMap
+
+    A jagged array of arrays of indices.
+
+    The basic interface is that of a read-only sequence where each element is an
+    array of indices corresponding to another array.
+    
+    For advanced usage, there are the attributes: ``offsets`` and ``indices``.
+    All indices are stored contiguously in the one-dimensional array
+    ``indices``. ``offsets`` is a one-dimensional array that contains all the
+    start indices of the child arrays in ``indices``, followed by the length of
+    ``indices``. This means the child array at index ``i`` is
+    ``indices[offsets[i]:offsets[i+1]]``.
+
+    .. py:attribute:: offsets
+        :type: IndexArray
+
+        This attribute is read-only
+    
+    .. py:attribute:: indices
+        :type: IndexArray
+
+        This attribute is read-only
+
+    .. py:method:: __len__() -> int
+    
+    .. py:method:: __getitem__(i, /) -> IndexArray
+    
+    .. py:method:: index_map(out: IndexArray|None = None) -> IndexArray
+
+        Return an array that maps the values in :py:attr:`indices` to their
+        position in this jagged array.
+        
+        The returned value is equivalent to:
+
+        .. code-block:: python
+
+            numpy.concat([[i]*len(a) for i,a in enumerate(self)], dtype=numpy.intp)
+        
+        Since NumPy doesn't support jagged arrays, this is provided as an
+        alternative means to allow pairing each output index with its input
+        index while using NumPy's fast operations.
+
+        If ``out`` is not ``None``, the data is written to ``out`` and returned,
+        instead of creating a new array. The supplied array must have the same
+        length as :py:attr:`indices`, and have a type of ``numpy.intp``.
+
+
+.. py:class:: TrackedLoop
+
+    .. py:attribute:: loop
+        :type: PointArray
+
+        A polygon represented by an array of points.
+    
+    .. py:attribute:: originals
+        :type: PointMap
+
+        A mapping of the indices of `loop` to the indices of the input arrays.
+
+
+.. py:class:: RecursiveLoop
+
+    .. py:attribute:: loop
+        :type: numpy.ndarray
+
+        A polygon represented by an array of points.
+    
+    .. py:attribute:: children
+        :type: tuple[RecursiveLoop,...]
+
+        The polygons inside of `loop`.
+
+
+.. py:class:: TrackedRecursiveLoop
+
+    .. py:attribute:: loop
+        :type: PointArray
+
+        A polygon represented by an array of points.
+
+    .. py:attribute:: children
+        :type: tuple[TrackedRecursiveLoop,...]
+
+        The polygons inside of `loop`.
+
+    .. py:attribute:: originals
+        :type: PointMap
+
+        A mapping of the indices of `loop` to the indices of the input arrays.
 
 
 .. py:class:: BoolOp
@@ -83,51 +186,73 @@ poly_ops module
     .. py:attribute:: clip
 
 
-.. py:function:: union_tree(loops: Iterable[PointArray],*,casting: CastingKind = "same_kind",dtype: DTypeLike = None) -> LoopTree
+.. py:function:: union(loops: Iterable[PointArrayLike],*,casting: CastingKind = "same_kind",dtype: DTypeLike = None,tree_out: bool = False,track_points: bool = False)
 
     Generate the union of a set of polygons.
 
+    The return type depends on ``tree_out`` and ``track_points``:
 
-.. py:function:: union_flat(loops: Iterable[PointArray],*,casting: CastingKind = "same_kind",dtype: DTypeLike = None) -> tuple[PointArray,...]
+    ============ ================ ====================================
+    ``tree_out`` ``track_points`` return type
+    ============ ================ ====================================
+    ``False``    ``False``        ``tuple[PointArray, ...]``
+    ``False``    ``True``         ``tuple[TrackedLoop, ...]``
+    ``True``     ``False``        ``tuple[RecursiveLoop, ...]``
+    ``True``     ``True``         ``tuple[TrackedRecursiveLoop, ...]``
+    ============ ================ ====================================
 
-    Generate the union of a set of polygons.
 
+.. py:function:: normalize(loops: Iterable[PointArrayLike],*,casting: CastingKind = "same_kind",dtype: DTypeLike = None,tree_out: bool = False,track_points: bool = False)
 
-.. py:function:: normalize_tree(loops: Iterable[ArrayLike],*,casting: CastingKind = "same_kind",dtype: DTypeLike = None) -> LoopTree
-
-    Return polygons consisting of the same lines as `loops` except all outer
+    Return polygons consisting of the same lines as ``loops`` except all outer
     lines are clockwise polygons, all singly nested lines are counter-clockwise
     polygons, all doubly-nested polygons are clockwise polygons, and so forth.
 
+    The return type depends on ``tree_out`` and ``track_points``:
 
-.. py:function:: normalize_flat(loops: Iterable[ArrayLike],*,casting: CastingKind = "same_kind",dtype: DTypeLike = None) -> tuple[PointArray,...]
+    ============ ================ ====================================
+    ``tree_out`` ``track_points`` return type
+    ============ ================ ====================================
+    ``False``    ``False``        ``tuple[PointArray, ...]``
+    ``False``    ``True``         ``tuple[TrackedLoop, ...]``
+    ``True``     ``False``        ``tuple[RecursiveLoop, ...]``
+    ``True``     ``True``         ``tuple[TrackedRecursiveLoop, ...]``
+    ============ ================ ====================================
 
-    Return polygons consisting of the same lines as `loops` except all outer
-    lines are clockwise polygons, all singly nested lines are counter-clockwise
-    polygons, all doubly-nested polygons are clockwise polygons, and so forth.
 
-
-.. py:function:: boolean_op_tree(subject: Iterable[PointArray],clip: Iterable[PointArray],op: BoolOp,*,casting: CastingKind = "same_kind",dtype: DTypeLike = None) -> LoopTree
+.. py:function:: boolean_op(subject: Iterable[PointArrayLike],clip: Iterable[PointArrayLike],op: BoolOp,*,casting: CastingKind = "same_kind",dtype: DTypeLike = None,tree_out: bool = False,track_points: bool = False)
 
     Perform a boolean operation on two sets of polygons.
 
+    The return type depends on ``tree_out`` and ``track_points``:
 
-.. py:function:: boolean_op_flat(loops: Iterable[PointArray],clip: Iterable[PointArray],op: BoolOp,*,casting: CastingKind = "same_kind",dtype: DTypeLike = None) -> tuple[PointArray,...]
-
-    Perform a boolean operation on two sets of polygons.
-
-
-.. py:function::  offset_tree(loops: Iterable[ArrayLike],magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind",dtype: DTypeLike = None) -> LoopTree
-
-    Inflate or shrink the union of `loops`.
-
-
-.. py:function::  offset_flat(loops: Iterable[ArrayLike],magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind",dtype: DTypeLike = None) -> tuple[PointArray,...]
-
-    Inflate or shrink the union of `loops`.
+    ============ ================ ====================================
+    ``tree_out`` ``track_points`` return type
+    ============ ================ ====================================
+    ``False``    ``False``        ``tuple[PointArray, ...]``
+    ``False``    ``True``         ``tuple[TrackedLoop, ...]``
+    ``True``     ``False``        ``tuple[RecursiveLoop, ...]``
+    ``True``     ``True``         ``tuple[TrackedRecursiveLoop, ...]``
+    ============ ================ ====================================
 
 
-.. py:function:: winding_dir(loop: PointArray,*,casting: CastingKind = "same_kind") -> int
+.. py:function::  offset(loops: Iterable[PointArrayLike],magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind",dtype: DTypeLike = None,tree_out: bool = False,track_points: bool = False)
+
+    Inflate or shrink the union of ``loops``.
+
+    The return type depends on ``tree_out`` and ``track_points``:
+
+    ============ ================ ====================================
+    ``tree_out`` ``track_points`` return type
+    ============ ================ ====================================
+    ``False``    ``False``        ``tuple[PointArray, ...]``
+    ``False``    ``True``         ``tuple[TrackedLoop, ...]``
+    ``True``     ``False``        ``tuple[RecursiveLoop, ...]``
+    ``True``     ``True``         ``tuple[TrackedRecursiveLoop, ...]``
+    ============ ================ ====================================
+
+
+.. py:function:: winding_dir(loop: PointArrayLike,*,casting: CastingKind = "same_kind") -> int
 
     Return a positive number if `loop` is clockwise, negative if
     counter-clockwise and zero if degenerate or exactly half of the polygon's
@@ -145,52 +270,54 @@ poly_ops module
     operations, making it more efficient than calling :py:func:`boolean_op_flat`
     or :py:func:`boolean_op_tree` for performing multiple operations.
 
-    .. py:method:: add_loop(loop: PointArray,bset: BoolSet,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_loop(loop: PointArrayLike,bset: BoolSet,*,casting: CastingKind = "same_kind") -> None
 
         Add an input polygon.
 
-    .. py:method:: add_loop_subject(loop: PointArray,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_loop_subject(loop: PointArrayLike,*,casting: CastingKind = "same_kind") -> None
 
         Add an input *subject* polygon.
 
-    .. py:method:: add_loop_clip(loop: PointArray,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_loop_clip(loop: PointArrayLike,*,casting: CastingKind = "same_kind") -> None
 
         Add an input *clip* polygon.
 
-    .. py:method:: add_loops(loops: PointArray,bset: BoolSet,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_loops(loops: PointArrayLike,bset: BoolSet,*,casting: CastingKind = "same_kind") -> None
 
         Add input polygons.
 
-    .. py:method:: add_loops_subject(loops: PointArray,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_loops_subject(loops: PointArrayLike,*,casting: CastingKind = "same_kind") -> None
 
         Add input *subject* polygons.
 
-    .. py:method:: add_loops_clip(loops: PointArray,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_loops_clip(loops: PointArrayLike,*,casting: CastingKind = "same_kind") -> None
 
         Add input *clip* polygons.
 
-    .. py:method:: add_loop_offset(self,loop: ArrayLike,bset: BoolSet,magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_loop_offset(self,loop: PointArrayLike,bset: BoolSet,magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
 
-    .. py:method:: add_loop_offset_subject(self,loop: ArrayLike,magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_loop_offset_subject(self,loop: PointArrayLike,magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
 
-    .. py:method:: add_loop_offset_clip(self,loop: ArrayLike,magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_loop_offset_clip(self,loop: PointArrayLike,magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
 
-    .. py:method:: add_loops_offset(self,loops: Iterable[ArrayLike],bset: BoolSet,magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_loops_offset(self,loops: Iterable[PointArrayLike],bset: BoolSet,magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
 
-    .. py:method:: add_loops_offset_subject(self,loops: Iterable[ArrayLike],magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_loops_offset_subject(self,loops: Iterable[PointArrayLike],magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
 
-    .. py:method:: add_loops_offset_clip(self,loops: Iterable[ArrayLike],magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_loops_offset_clip(self,loops: Iterable[PointArrayLike],magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
 
-    .. py:method:: execute_tree(op: BoolOp,*,dtype: DTypeLike = None) -> LoopTree
-
-        Perform a boolean operation and return the result.
-
-        After calling this function, all the input is consumed. To perform
-        another operation, polygons must be added again.
-
-    .. py:method:: execute_flat(op: BoolOp,*,dtype: DTypeLike = None) -> tuple[PointArray,...]
+    .. py:method:: execute(op: BoolOp,*,dtype: DTypeLike = None,tree_out: bool = False)
 
         Perform a boolean operation and return the result.
+
+        The return value depends on ``tree_out``:
+
+        ============ =============================
+        ``tree_out`` return type
+        ============ =============================
+        ``False``    ``tuple[PointArray, ...]``
+        ``True``     ``tuple[RecursiveLoop, ...]``
+        ============ =============================
 
         After calling this function, all the input is consumed. To perform
         another operation, polygons must be added again.
@@ -198,3 +325,11 @@ poly_ops module
     .. py:method:: reset() -> None
 
         Discard all polygons added so far.
+
+
+.. py:class:: TrackedClipper
+
+    This is identical to :py:class:`Clipper` except the return value of
+    :py:meth:`~Clipper.execute` is ``tuple[TrackedLoop, ...]`` if ``tree_out``
+    is ``False``, and ``tuple[TrackedRecursiveLoop, ...]`` if ``tree_out`` is
+    ``True``.

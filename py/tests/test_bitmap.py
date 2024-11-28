@@ -168,7 +168,7 @@ class BitmapTestCase(unittest.TestCase):
                         self.clip.add_loops_clip(item.set_data[polyops.BoolSet.clip])
 
                     self.rast.reset()
-                    self.rast.add_loops(self.clip.execute_flat(op))
+                    self.rast.add_loops(self.clip.execute(op))
                     for x1,x2,y,wind in self.rast.scan_lines(test_img.shape[1],test_img.shape[0]):
                         if wind > 0:
                             test_img[y,x1:x2+1] = 1
