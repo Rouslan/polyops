@@ -109,8 +109,10 @@ void add_offset_point(
 
     sink(p2 + vround<Coord>(offset),orig_i2);
 
-    if(static_cast<real_t>(triangle_winding(p1,p2,p3)) * coord_ops<Coord>::unit(magnitude) > 0) {
-        // it's concave so we need to approximate an arc
+    bool concave = triangle_winding(p1,p2,p3) > 0;
+    if(magnitude < real_t(0)) concave = !concave;
+    if(concave) {
+        // we need to approximate an arc
 
         real_t angle = coord_ops<Coord>::pi() - vangle<Coord>(p1-p2,p3-p2);
         Coord steps = coord_ops<Coord>::to_coord(magnitude * angle / static_cast<real_t>(arc_step_size));

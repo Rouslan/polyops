@@ -2,6 +2,7 @@
 #distutils: language = c++
 
 cimport cython
+cimport cpython
 import numpy as np
 cimport numpy as np
 cimport common
@@ -364,6 +365,7 @@ cdef extern from *:
 
     cppclass clipper:
         void reset()
+        size_t& last_orig_i()
     
     cppclass i_point_tracker:
         pass
@@ -401,6 +403,9 @@ cdef class PointMap:
             raise TypeError('"offsets" must be a contiguous array of type numpy.intp')
         self.offsets = offsets
         self.indices = indices
+    
+    def __repr__(self):
+        return cpython.PyUnicode_FromFormat("PointMap(%R,%R)",<cpython.PyObject*>self.offsets,<cpython.PyObject*>self.indices)
 
     def __len__(self):
         return self.offsets.shape[0] - 1
@@ -682,6 +687,15 @@ cdef class TrackedClipper:
 
     def __dealloc__(self):
         del self._clip
+    
+    @property
+    def last_orig_i(self):
+        return self._clip.base.last_orig_i()
+    
+    @last_orig_i.setter
+    def last_orig_i(self,size_t val):
+        cdef size_t *dest = &self._clip.base.last_orig_i()
+        dest[0] = val
 
     cdef _add_loop(self,loop,bset,casting_obj):
         cdef np.NPY_CASTING casting

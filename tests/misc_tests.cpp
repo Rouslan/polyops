@@ -220,23 +220,52 @@ int main() {
         std::size_t o3[] = {2};
         std::size_t o4[] = {3};
         expect_range_eq(box2[0].original_points,o1);
-        expect(box2[1].p == poly_ops::point_t{0,-50});
+        expect(box2[1].p == p{0,-50});
         expect_range_eq(box2[1].original_points,o1);
 
-        expect(box2[2].p == poly_ops::point_t{1000,-50});
+        expect(box2[2].p == p{1000,-50});
         expect_range_eq(box2[2].original_points,o2);
-        expect(box2[3].p == poly_ops::point_t{1050,0});
+        expect(box2[3].p == p{1050,0});
         expect_range_eq(box2[3].original_points,o2);
 
-        expect(box2[4].p == poly_ops::point_t{1050,1000});
+        expect(box2[4].p == p{1050,1000});
         expect_range_eq(box2[4].original_points,o3);
-        expect(box2[5].p == poly_ops::point_t{1000,1050});
+        expect(box2[5].p == p{1000,1050});
         expect_range_eq(box2[5].original_points,o3);
 
-        expect(box2[6].p == poly_ops::point_t{0,1050});
+        expect(box2[6].p == p{0,1050});
         expect_range_eq(box2[6].original_points,o4);
-        expect(box2[7].p == poly_ops::point_t{-50,1000});
+        expect(box2[7].p == p{-50,1000});
         expect_range_eq(box2[7].original_points,o4);
+    };
+
+    "Test basic inset"_test = [] {
+        loop_t box = {{0,0},{1000,0},{1000,1000},{0,1000}};
+        auto result = poly_ops::offset<false,int>(box,-50,1000000,poly_ops::origin_point_tracker{});
+        expect(fatal(result.size() == 1_u));
+        expect(fatal(result[0u].size() == 4_u));
+
+        std::vector<poly_ops::point_and_origin<int>> box2{result[0u].begin(),result[0u].end()};
+
+        // rotate until {50,50} is the first point
+        auto itr = std::ranges::find(box2,poly_ops::point_t{50,50},[](auto &x) { return x.p; });
+        expect(fatal(itr != box2.end()));
+        std::ranges::rotate(box2,itr);
+
+        std::size_t o1[] = {0};
+        std::size_t o2[] = {1};
+        std::size_t o3[] = {2};
+        std::size_t o4[] = {3};
+        expect_range_eq(box2[0].original_points,o1);
+
+        expect(box2[1].p == p{950,50});
+        expect_range_eq(box2[1].original_points,o2);
+
+        expect(box2[2].p == p{950,950});
+        expect_range_eq(box2[2].original_points,o3);
+
+        expect(box2[3].p == p{50,950});
+        expect_range_eq(box2[3].original_points,o4);
     };
 
     "Test compound offset"_test = [] {

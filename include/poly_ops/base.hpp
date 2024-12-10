@@ -136,15 +136,6 @@ template<typename Coord> struct coord_ops {
     static Coord to_coord(real_t x) { return static_cast<Coord>(x); }
 
     /**
-     * Return a value with the same sign as `x` but with a magnitude of 1
-     *
-     * Default implementation:
-     *
-     *     return std::copysign(1.0,x);
-     */
-    static real_t unit(real_t x) { return std::copysign(1.0,x); }
-
-    /**
      * Return the value of pi.
      *
      * Default implementation:
@@ -292,7 +283,7 @@ template<typename T> concept coordinate =
  *         { point_ops<T>::get_y(v) } -> std::convertible_to<Coord>;
  *     }
  */
-template<typename T,typename Coord> concept point = requires(const T &v) {
+template<typename T,typename Coord> concept point_like = requires(const T &v) {
     { point_ops<T>::get_x(v) } -> std::convertible_to<Coord>;
     { point_ops<T>::get_y(v) } -> std::convertible_to<Coord>;
 };
@@ -311,7 +302,7 @@ template<typename T> struct point_t {
     constexpr point_t(const point_t &b) = default;
 
     /** Construct `point_t` from any point-like object */
-    template<point<T> U> constexpr point_t(const U &b)
+    template<point_like<T> U> constexpr point_t(const U &b)
         noexcept(noexcept(point_t(point_ops<U>::get_x(b),point_ops<U>::get_y(b))))
         : _data{point_ops<U>::get_x(b),point_ops<U>::get_y(b)} {}
     
@@ -503,10 +494,10 @@ constexpr point_t<real_coord_t<Coord>> perp_vector(
 /**
  * Defined as:
  *
- *     std::ranges::range<T> && point<std::ranges::range_value_t<T>,Coord>
+ *     std::ranges::range<T> && point_like<std::ranges::range_value_t<T>,Coord>
  */
 template<typename T,typename Coord> concept point_range
-    = std::ranges::range<T> && point<std::ranges::range_value_t<T>,Coord>;
+    = std::ranges::range<T> && point_like<std::ranges::range_value_t<T>,Coord>;
 
 /**
  * Defined as:
@@ -520,11 +511,11 @@ template<typename T,typename Coord> concept point_range_range
  * Defined as:
  *
  *     td::ranges::range<T> && (point_range<std::ranges::range_value_t<T>,Coord>
- *         || point<std::ranges::range_value_t<T>,Coord>)
+ *         || point_like<std::ranges::range_value_t<T>,Coord>)
  */
 template<typename T,typename Coord> concept point_range_or_range_range
     = std::ranges::range<T> && (point_range<std::ranges::range_value_t<T>,Coord>
-        || point<std::ranges::range_value_t<T>,Coord>);
+        || point_like<std::ranges::range_value_t<T>,Coord>);
 
 template<coordinate Coord> class winding_dir_sink {
     point_t<Coord> first;

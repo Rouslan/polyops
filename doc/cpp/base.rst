@@ -11,7 +11,7 @@ Concepts
 
 -----------------------------
 
-.. doxygenconcept:: point
+.. doxygenconcept:: point_like
 
 -----------------------------
 

@@ -1098,7 +1098,7 @@ template<typename T> concept sized_or_forward_range
     = std::ranges::sized_range<T> || std::ranges::forward_range<T>;
 
 template<typename T,typename Coord> concept sized_or_forward_point_range
-    = sized_or_forward_range<T> && point<std::ranges::range_value_t<T>,Coord>;
+    = sized_or_forward_range<T> && point_like<std::ranges::range_value_t<T>,Coord>;
 
 template<typename T,typename Coord> concept sized_or_forward_point_range_range
     /* We have to iterate over the loops to get their sizes. */

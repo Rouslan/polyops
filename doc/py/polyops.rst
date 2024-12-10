@@ -238,7 +238,7 @@ polyops module
 
 .. py:function::  offset(loops: Iterable[PointArrayLike],magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind",dtype: DTypeLike = None,tree_out: bool = False,track_points: bool = False)
 
-    Inflate or shrink the union of ``loops``.
+    Inflate or shrink each loop in ``loops`` and return the union.
 
     The return type depends on ``tree_out`` and ``track_points``:
 

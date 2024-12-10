@@ -30,6 +30,6 @@ loop_b = [
     [45,23],
     [78,26]]
 
-output = poly_ops.boolean_op_flat([loop_a],[loop_b],poly_ops.difference)
+output = poly_ops.boolean_op([loop_a],[loop_b],poly_ops.difference)
 print(output)
 ```
