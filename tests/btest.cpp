@@ -388,8 +388,8 @@ bool test_op(
     test_img.clear();
 
     if(entry.offset) {
-        add_offset_loops_subject(clip,test.subject,entry.offset,OFFSET_ARC_STEP_SIZE);
-        add_offset_loops_clip(clip,test.clip,entry.offset,OFFSET_ARC_STEP_SIZE);
+        add_offset_subject(clip,test.subject,entry.offset,OFFSET_ARC_STEP_SIZE);
+        add_offset_clip(clip,test.clip,entry.offset,OFFSET_ARC_STEP_SIZE);
     } else {
         clip.add_loops_subject(test.subject);
         clip.add_loops_clip(test.clip);

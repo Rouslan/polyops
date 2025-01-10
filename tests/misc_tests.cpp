@@ -34,12 +34,37 @@ template<typename R> std::ostream &operator<<(std::ostream &os,const any_range<R
     return os << '}';
 }
 
+namespace math {
+    template<typename T,typename U> auto abs_diff(const poly_ops::point_t<T> &a,const poly_ops::point_t<U> &b) {
+        return std::max(abs_diff(a[0],b[0]),abs_diff(a[1],b[1]));
+    }
+
+    template<typename T,typename U> auto abs_diff(const any_range<T> &a,const any_range<U> &b) {
+        using r_type = decltype(abs_diff(*std::ranges::begin(a),*std::ranges::begin(b)));
+        const r_type max_val = std::numeric_limits<r_type>::max();
+
+        auto itr1 = std::ranges::begin(a);
+        auto itr2 = std::ranges::begin(b);
+        auto end1 = std::ranges::end(a);
+        auto end2 = std::ranges::end(b);
+        r_type max_diff = 0;
+        for(;;) {
+            if(itr1 == end1) {
+                if(itr2 != end2) return max_val;
+                return max_diff;
+            }
+            if(itr2 == end2) return max_val;
+            max_diff = std::max(max_diff,abs_diff(*itr1,*itr2));
+        }
+    }
+}
+
 template<typename R1,typename R2> auto expect_range_eq(R1 &&a,R2 &&b,std::source_location loc=std::source_location::current()) {
     return boost::ut::expect(boost::ut::eq(any_range{a},any_range{b}),loc);
 }
 
-template<typename T,typename U> bool point_approx_equal(poly_ops::point_t<T> a,poly_ops::point_t<U> b,double delta) {
-    return std::abs(a.x() - b.x()) <= delta && std::abs(a.y() - b.y()) < delta;
+template<typename T,typename U,typename V> bool point_approx_equal(poly_ops::point_t<T> a,poly_ops::point_t<U> b,V error) {
+    return std::abs(a.x() - b.x()) <= error && std::abs(a.y() - b.y()) <= error;
 }
 
 template<typename T> struct point_with_delta {
@@ -56,6 +81,8 @@ template<typename R> std::ostream &operator<<(std::ostream &os,const point_with_
 template<typename T,typename U> auto expect_range_eq(poly_ops::point_t<T> a,poly_ops::point_t<U> b,double delta,std::source_location loc=std::source_location::current()) {
     return boost::ut::expect(boost::ut::eq(point_with_delta{a,delta},b),loc);
 }
+
+constexpr inline auto point_view = std::views::transform([](const poly_ops::point_and_origin<int> &po) { return po.p; });
 
 struct p {
     int x;
@@ -120,6 +147,13 @@ void for_each_combination(std::span<std::span<const poly_ops::point_t<int>>> inp
     std::vector<std::span<const poly_ops::point_t<int>>> buffer;
     buffer.reserve(input.size());
     for_each_combination(input,fun,buffer);
+}
+
+template<typename T,typename R> auto find_approx_point(const poly_ops::point_t<T> &p,R &&items) {
+    for(auto itr = std::ranges::begin(items); itr != std::ranges::end(items); ++itr) {
+        if(point_approx_equal(p,itr->p,1.0)) return itr;
+    }
+    return std::ranges::end(items);
 }
 
 int main() {
@@ -315,6 +349,15 @@ int main() {
 
     poly_ops::origin_tracked_clipper<int> tclipper;
 
+    std::vector<std::tuple<loop_t,double,int,poly_ops::origin_tracked_clipper<int>*>> sample_data{
+        {loop_t{{0,0},{1000,0},{1000,1000},{0,1000}},50.0,10,nullptr},
+        {loop_t{{3225,-3225},{5450,-13525},{16000,-15450},{8025,-1575}},2000.0,100,nullptr},
+        {loop_t{{20,20},{140,35},{37,142},{20,100}},20.0,15,nullptr},
+        {loop_t{{0,0},{1000,0},{1000,1000},{0,1000}},50.0,10,&tclipper},
+        {loop_t{{3225,-3225},{5450,-13525},{16000,-15450},{8025,-1575}},2000.0,100,&tclipper},
+        {loop_t{{20,20},{140,35},{37,142},{20,100}},20.0,15,&tclipper}
+    };
+
     "Test offset curves"_test = [](auto values) {
         struct point_meta {
             double angle;
@@ -346,7 +389,7 @@ int main() {
         poly_ops::origin_point_tracker tracker{};
 
         if(tclipper) {
-            poly_ops::add_offset_loops_subject(*tclipper,loop,offset_amount,arc_step_size);
+            poly_ops::add_offset_subject(*tclipper,loop,offset_amount,arc_step_size);
             auto result = tclipper->execute(poly_ops::bool_op::union_);
             expect(fatal(result.size() == 1_u));
             box2.insert(box2.end(),result[0u].begin(),result[0u].end());
@@ -357,11 +400,9 @@ int main() {
         }
         expect(fatal(eq(box2.size(),total_points)));
 
-        std::size_t i = 0;
-        for(;; ++i) {
-            expect(fatal(lt(i,box2.size())));
-            if(point_approx_equal(box2[i].p,meta[0].curve_start,1.0)) break;
-        }
+        auto itr = find_approx_point(meta[0].curve_start,box2);
+        expect(fatal(itr != box2.end()));
+        std::size_t i = std::size_t(itr - box2.begin());
 
         for(std::size_t k=0; k<loop.size(); ++k) {
             auto &m = meta[k];
@@ -374,14 +415,67 @@ int main() {
             }
             expect_range_eq(box2[prev_i].p,m.curve_end,1.0);
         }
-    } | std::vector<std::tuple<loop_t,double,int,poly_ops::origin_tracked_clipper<int>*>>{
-        {loop_t{{0,0},{1000,0},{1000,1000},{0,1000}},50.0,10,nullptr},
-        {loop_t{{3225,-3225},{5450,-13525},{16000,-15450},{8025,-1575}},2000.0,100,nullptr},
-        {loop_t{{20,20},{140,35},{37,142},{20,100}},20.0,15,nullptr},
-        {loop_t{{0,0},{1000,0},{1000,1000},{0,1000}},50.0,10,&tclipper},
-        {loop_t{{3225,-3225},{5450,-13525},{16000,-15450},{8025,-1575}},2000.0,100,&tclipper},
-        {loop_t{{20,20},{140,35},{37,142},{20,100}},20.0,15,&tclipper}
-    };
+    } | sample_data;
+
+    auto sample_data2 = sample_data;
+    sample_data2.emplace_back(loop_t{{20,20},{140,35},{37,142},{20,100},{37,142},{140,35},{20,20}},20.0,15,nullptr);
+
+    "Test open lines"_test = [](auto values) {
+        /* open lines can be emulated by creating a new polygon with all the
+        points, followed by all the points reversed */
+
+        auto &&[loop,offset_amount,arc_step_size,tclipper] = values;
+        loop_t line{loop};
+        line.insert(line.end(),loop.rbegin()+1,loop.rend()-1);
+
+        std::vector<poly_ops::point_and_origin<int>> out1, out2;
+
+        /* out1 and out2 will reference data in these objects */
+        poly_ops::origin_point_tracker tracker1, tracker2;
+
+        if(tclipper) {
+            {
+                poly_ops::add_offset(tclipper->base,line,poly_ops::bool_set::subject,offset_amount,arc_step_size,true,tracker1.callbacks());
+                auto result1 = tclipper->base.execute(poly_ops::bool_op::union_,tracker1);
+                expect(fatal(result1.size() == 1_u));
+                out1.insert(out1.end(),result1[0u].begin(),result1[0u].end());
+            }
+
+            {
+                poly_ops::add_offset(tclipper->base,loop,poly_ops::bool_set::subject,offset_amount,arc_step_size,false,tracker2.callbacks());
+                auto result2 = tclipper->base.execute(poly_ops::bool_op::union_,tracker2);
+                expect(fatal(result2.size() == 1_u));
+                out2.insert(out2.end(),result2[0u].begin(),result2[0u].end());
+            }
+        } else {
+            auto result1 = poly_ops::offset<false,int>(line,offset_amount,arc_step_size,tracker1);
+            expect(fatal(result1.size() == 1_u));
+            out1.insert(out1.end(),result1[0u].begin(),result1[0u].end());
+
+            auto result2 = poly_ops::offset<false,int>(loop,offset_amount,arc_step_size,tracker2,false);
+            expect(fatal(result2.size() == 1_u));
+            out2.insert(out2.end(),result2[0u].begin(),result2[0u].end());
+        }
+
+        expect(fatal(eq(out1.size(),out2.size())));
+
+        auto itr = find_approx_point(out1[0].p,out2);
+        expect(fatal(itr != out2.end()));
+        std::ranges::rotate(out2,itr);
+
+        for(std::size_t i=0; i<out1.size(); ++i) {
+            expect(point_approx_equal(out1[i].p,out2[i].p,1));
+            auto op1 = out1[i].original_points;
+            std::vector<std::size_t> norm_op1(op1.begin(),op1.end());
+            for(auto &x : norm_op1) {
+                if(x >= loop.size()) x = loop.size()*2 - 2 - x;
+            }
+            std::ranges::sort(norm_op1);
+            expect_range_eq(
+                norm_op1,
+                out2[i].original_points);
+        }
+    } | sample_data2;
 
     return 0;
 }

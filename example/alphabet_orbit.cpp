@@ -95,7 +95,7 @@ struct scene {
 
             line_buffer.emplace_back();
             line_buffer.back().reserve(loop.size()+1);
-            for(auto &p : loop) line_buffer.back().emplace_back(p[0]/10.0f,p[1]/10.0f);
+            for(auto &&p : loop) line_buffer.back().emplace_back(p[0]/10.0f,p[1]/10.0f);
             auto first = *loop.begin();
             line_buffer.back().emplace_back(first[0]/10.0f,first[1]/10.0f);
         }

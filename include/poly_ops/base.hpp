@@ -456,9 +456,17 @@ constexpr real_coord_t<Coord> vmag(const point_t<T> &x) {
 
 template<typename Coord,typename T>
 constexpr real_coord_t<T> vangle(const point_t<T> &a,const point_t<T> &b) {
-    auto ra = vcast<real_coord_t<Coord>>(a);
-    auto rb = vcast<real_coord_t<Coord>>(b);
-    return coord_ops<Coord>::acos(vdot(ra,rb)/(vmag<Coord>(ra)*vmag<Coord>(rb)));
+    using real_t = real_coord_t<Coord>;
+
+    auto ra = vcast<real_t>(a);
+    auto rb = vcast<real_t>(b);
+    real_t cosine = vdot(ra,rb)/(vmag<Coord>(ra)*vmag<Coord>(rb));
+
+    /* this little error occurs frequently when doing open-line offsets */
+    if(cosine > real_t(1)) cosine = real_t(1);
+    else if(cosine < real_t(-1)) cosine = real_t(-1);
+
+    return coord_ops<Coord>::acos(cosine);
 }
 
 /**

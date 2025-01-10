@@ -242,12 +242,13 @@ cdef extern from *:
         }
     }
 
-    PyObject *_clipper_add_loop_offset(
+    PyObject *_clipper_add_offset(
         clipper &c,
         PyArrayObject *ar,
         _bool_set cat,
         double magnitude,
         int step_size,
+        int closed,
         NPY_CASTING casting,
         i_point_tracker *pt) noexcept
     {
@@ -259,7 +260,7 @@ cdef extern from *:
 
             {
                 cond_gil_unlocker unlocker{!nr.needs_api()};
-                poly_ops::add_offset_loops(c,nr,static_cast<poly_ops::bool_set>(cat),magnitude,step_size,pt);
+                poly_ops::add_offset(c,nr,static_cast<poly_ops::bool_set>(cat),magnitude,step_size,closed != 0,pt);
             }
 
             Py_RETURN_NONE;
@@ -365,7 +366,7 @@ cdef extern from *:
 
     cppclass clipper:
         void reset()
-        size_t& last_orig_i()
+        size_t& next_orig_i()
     
     cppclass i_point_tracker:
         pass
@@ -379,7 +380,7 @@ cdef extern from *:
         void reset()
 
     object _clipper_add_loop(clipper&,np.ndarray,_bool_set,np.NPY_CASTING,i_point_tracker*)
-    object _clipper_add_loop_offset(clipper&,np.ndarray,_bool_set,double,int,np.NPY_CASTING,i_point_tracker*)
+    object _clipper_add_offset(clipper&,np.ndarray,_bool_set,double,int,bint,np.NPY_CASTING,i_point_tracker*)
     object _tracked_clipper_execute_(bint tree,clipper&,_bool_op,np.dtype,point_tracker&)
     object _clipper_execute_(bint tree,clipper&,_bool_op,np.dtype)
     object _winding_dir(np.ndarray,np.NPY_CASTING)
@@ -467,7 +468,7 @@ cdef load_loops(clipper &c,loops,_bool_set bset,common_dtype,np.NPY_CASTING cast
         common_dtype = load_loop(c,loop,bset,common_dtype,casting,pt)
     return common_dtype
 
-cdef load_loop_offset(clipper &c,loop,_bool_set bset,double magnitude,int step_size,common_dtype,np.NPY_CASTING casting,i_point_tracker *pt):
+cdef load_offset(clipper &c,loop,_bool_set bset,double magnitude,int step_size,bint closed,common_dtype,np.NPY_CASTING casting,i_point_tracker *pt):
     cdef np.ndarray ar
     cdef np.dtype r
 
@@ -479,12 +480,12 @@ cdef load_loop_offset(clipper &c,loop,_bool_set bset,double magnitude,int step_s
         r = ar.descr
     else:
         r = PyArray_PromoteTypes(ar.descr,<np.dtype>common_dtype)
-    _clipper_add_loop_offset(c,ar,bset,magnitude,step_size,casting,pt)
+    _clipper_add_offset(c,ar,bset,magnitude,step_size,closed,casting,pt)
     return r
 
-cdef load_loops_offset(clipper &c,loops,_bool_set bset,double magnitude,int step_size,common_dtype,np.NPY_CASTING casting,i_point_tracker *pt):
+cdef load_offsets(clipper &c,loops,_bool_set bset,double magnitude,int step_size,bint closed,common_dtype,np.NPY_CASTING casting,i_point_tracker *pt):
     for loop in loops:
-        common_dtype = load_loop_offset(c,loop,bset,magnitude,step_size,common_dtype,casting,pt)
+        common_dtype = load_offset(c,loop,bset,magnitude,step_size,closed,common_dtype,casting,pt)
     return common_dtype
 
 cdef np.dtype decide_dtype(np.dtype calculated,explicit):
@@ -545,7 +546,7 @@ cdef _bool_set to_bool_set(x) except _bool_set.BOOL_SET_INVALID:
     cdef int val = x
     if (val != _bool_set.BOOL_SET_SUBJECT
         and val != _bool_set.BOOL_SET_CLIP):
-        raise TypeError('"bset" is not one of the valid operation types')
+        raise TypeError('"bset" is not one of the valid set types')
     return <_bool_set>val
 
 def union(loops,*,casting='same_kind',dtype=None,bint tree_out=False,track_points=False):
@@ -554,7 +555,7 @@ def union(loops,*,casting='same_kind',dtype=None,bint tree_out=False,track_point
 def normalize(loops,*,casting='same_kind',dtype=None,bint tree_out=False,track_points=False):
     return unary_op_(tree_out,loops,_bool_op.BOOL_OP_NORMALIZE,casting,dtype,track_points)
 
-def offset(loops,double magnitude,int arc_step_size,*,casting='same_kind',dtype=None,bint tree_out=False,track_points=False):
+def offset(loops,double magnitude,int arc_step_size,bint closed=True,*,casting='same_kind',dtype=None,bint tree_out=False,track_points=False):
     cdef np.NPY_CASTING casting_raw
     cdef clipper c
     cdef point_tracker tracker
@@ -563,12 +564,12 @@ def offset(loops,double magnitude,int arc_step_size,*,casting='same_kind',dtype=
     dtype = check_dtype(dtype)
 
     if track_points:
-        calc_dtype = load_loops_offset(c,loops,_bool_set.BOOL_SET_SUBJECT,magnitude,arc_step_size,None,casting_raw,tracker.callbacks())
+        calc_dtype = load_offsets(c,loops,_bool_set.BOOL_SET_SUBJECT,magnitude,arc_step_size,closed,None,casting_raw,tracker.callbacks())
         if calc_dtype is None: return ()
 
         return _tracked_clipper_execute_(tree_out,c,_bool_op.BOOL_OP_UNION,decide_dtype(<np.dtype>calc_dtype,dtype),tracker)
 
-    calc_dtype = load_loops_offset(c,loops,_bool_set.BOOL_SET_SUBJECT,magnitude,arc_step_size,None,casting_raw,NULL)
+    calc_dtype = load_offsets(c,loops,_bool_set.BOOL_SET_SUBJECT,magnitude,arc_step_size,closed,None,casting_raw,NULL)
     if calc_dtype is None: return ()
 
     return _clipper_execute_(tree_out,c,_bool_op.BOOL_OP_UNION,decide_dtype(<np.dtype>calc_dtype,dtype))
@@ -611,10 +612,10 @@ cdef class Clipper:
         common._casting_converter(casting_obj,&casting)
         self.calc_dtype = load_loop(self._clip[0],loop,to_bool_set(bset),self.calc_dtype,casting,NULL)
     
-    cdef _add_loop_offset(self,loop,bset,double magnitude,int step_size,casting_obj):
+    cdef _add_offset(self,loop,bset,double magnitude,int step_size,bint closed,casting_obj):
         cdef np.NPY_CASTING casting
         common._casting_converter(casting_obj,&casting)
-        self.calc_dtype = load_loop_offset(self._clip[0],loop,to_bool_set(bset),magnitude,step_size,self.calc_dtype,casting,NULL)
+        self.calc_dtype = load_offset(self._clip[0],loop,to_bool_set(bset),magnitude,step_size,closed,self.calc_dtype,casting,NULL)
 
     def add_loop(self,loop,bset,*,casting='same_kind'):
         self._add_loop(loop,bset,casting)
@@ -625,24 +626,24 @@ cdef class Clipper:
     def add_loop_clip(self,loop,*,casting='same_kind'):
         self._add_loop(loop,_bool_set.BOOL_SET_CLIP,casting)
     
-    def add_loop_offset(self,loop,bset,double magnitude,int arc_step_size,*,casting='same_kind'):
-        self._add_loop_offset(loop,bset,magnitude,arc_step_size,casting)
+    def add_offset(self,loop,bset,double magnitude,int arc_step_size,bint closed=True,*,casting='same_kind'):
+        self._add_offset(loop,bset,magnitude,arc_step_size,closed,casting)
 
-    def add_loop_offset_subject(self,loop,double magnitude,int arc_step_size,*,casting='same_kind'):
-        self._add_loop_offset(loop,_bool_set.BOOL_SET_SUBJECT,magnitude,arc_step_size,casting)
+    def add_offset_subject(self,loop,double magnitude,int arc_step_size,bint closed=True,*,casting='same_kind'):
+        self._add_offset(loop,_bool_set.BOOL_SET_SUBJECT,magnitude,arc_step_size,closed,casting)
 
-    def add_loop_offset_clip(self,loop,double magnitude,int arc_step_size,*,casting='same_kind'):
-        self._add_loop_offset(loop,_bool_set.BOOL_SET_CLIP,magnitude,arc_step_size,casting)
+    def add_offset_clip(self,loop,double magnitude,int arc_step_size,bint closed=True,*,casting='same_kind'):
+        self._add_offset(loop,_bool_set.BOOL_SET_CLIP,magnitude,arc_step_size,closed,casting)
 
     cdef _add_loops(self,loops,bset,casting_obj):
         cdef np.NPY_CASTING casting
         common._casting_converter(casting_obj,&casting)
         self.calc_dtype = load_loops(self._clip[0],loops,to_bool_set(bset),self.calc_dtype,casting,NULL)
 
-    cdef _add_loops_offset(self,loops,bset,double magnitude,int step_size,casting_obj):
+    cdef _add_offsets(self,loops,bset,double magnitude,int step_size,bint closed,casting_obj):
         cdef np.NPY_CASTING casting
         common._casting_converter(casting_obj,&casting)
-        self.calc_dtype = load_loops_offset(self._clip[0],loops,bset,magnitude,step_size,self.calc_dtype,casting,NULL)
+        self.calc_dtype = load_offsets(self._clip[0],loops,bset,magnitude,step_size,closed,self.calc_dtype,casting,NULL)
 
     def add_loops(self,loops,bset,*,casting='same_kind'):
         self._add_loops(loops,bset,casting)
@@ -653,14 +654,14 @@ cdef class Clipper:
     def add_loops_clip(self,loops,*,casting='same_kind'):
         self._add_loops(loops,_bool_set.BOOL_SET_CLIP,casting)
     
-    def add_loops_offset(self,loops,bset,double magnitude,int arc_step_size,*,casting='same_kind'):
-        self._add_loops_offset(loops,bset,magnitude,arc_step_size,casting)
+    def add_offsets(self,loops,bset,double magnitude,int arc_step_size,bint closed=True,*,casting='same_kind'):
+        self._add_offsets(loops,bset,magnitude,arc_step_size,closed,casting)
 
-    def add_loops_offset_subject(self,loops,double magnitude,int arc_step_size,*,casting='same_kind'):
-        self._add_loops_offset(loops,_bool_set.BOOL_SET_SUBJECT,magnitude,arc_step_size,casting)
+    def add_offsets_subject(self,loops,double magnitude,int arc_step_size,bint closed=True,*,casting='same_kind'):
+        self._add_offsets(loops,_bool_set.BOOL_SET_SUBJECT,magnitude,arc_step_size,closed,casting)
 
-    def add_loops_offset_clip(self,loops,double magnitude,int arc_step_size,*,casting='same_kind'):
-        self._add_loops_offset(loops,_bool_set.BOOL_SET_CLIP,magnitude,arc_step_size,casting)
+    def add_offsets_clip(self,loops,double magnitude,int arc_step_size,bint closed=True,*,casting='same_kind'):
+        self._add_offsets(loops,_bool_set.BOOL_SET_CLIP,magnitude,arc_step_size,closed,casting)
 
     def execute(self,op,*,dtype=None,bint tree_out=False):
         dtype = check_dtype(dtype)
@@ -689,12 +690,12 @@ cdef class TrackedClipper:
         del self._clip
     
     @property
-    def last_orig_i(self):
-        return self._clip.base.last_orig_i()
+    def next_orig_i(self):
+        return self._clip.base.next_orig_i()
     
-    @last_orig_i.setter
-    def last_orig_i(self,size_t val):
-        cdef size_t *dest = &self._clip.base.last_orig_i()
+    @next_orig_i.setter
+    def next_orig_i(self,size_t val):
+        cdef size_t *dest = &self._clip.base.next_orig_i()
         dest[0] = val
 
     cdef _add_loop(self,loop,bset,casting_obj):
@@ -702,10 +703,10 @@ cdef class TrackedClipper:
         common._casting_converter(casting_obj,&casting)
         self.calc_dtype = load_loop(self._clip.base,loop,to_bool_set(bset),self.calc_dtype,casting,self._clip.tracker.callbacks())
     
-    cdef _add_loop_offset(self,loop,bset,double magnitude,int step_size,casting_obj):
+    cdef _add_offset(self,loop,bset,double magnitude,int step_size,bint closed,casting_obj):
         cdef np.NPY_CASTING casting
         common._casting_converter(casting_obj,&casting)
-        self.calc_dtype = load_loop_offset(self._clip.base,loop,to_bool_set(bset),magnitude,step_size,self.calc_dtype,casting,self._clip.tracker.callbacks())
+        self.calc_dtype = load_offset(self._clip.base,loop,to_bool_set(bset),magnitude,step_size,closed,self.calc_dtype,casting,self._clip.tracker.callbacks())
 
     def add_loop(self,loop,bset,*,casting='same_kind'):
         self._add_loop(loop,bset,casting)
@@ -716,24 +717,24 @@ cdef class TrackedClipper:
     def add_loop_clip(self,loop,*,casting='same_kind'):
         self._add_loop(loop,_bool_set.BOOL_SET_CLIP,casting)
     
-    def add_loop_offset(self,loop,bset,double magnitude,int arc_step_size,*,casting='same_kind'):
-        self._add_loop_offset(loop,bset,magnitude,arc_step_size,casting)
+    def add_offset(self,loop,bset,double magnitude,int arc_step_size,bint closed=True,*,casting='same_kind'):
+        self._add_offset(loop,bset,magnitude,arc_step_size,closed,casting)
 
-    def add_loop_offset_subject(self,loop,double magnitude,int arc_step_size,*,casting='same_kind'):
-        self._add_loop_offset(loop,_bool_set.BOOL_SET_SUBJECT,magnitude,arc_step_size,casting)
+    def add_offset_subject(self,loop,double magnitude,int arc_step_size,bint closed=True,*,casting='same_kind'):
+        self._add_offset(loop,_bool_set.BOOL_SET_SUBJECT,magnitude,arc_step_size,closed,casting)
 
-    def add_loop_offset_clip(self,loop,double magnitude,int arc_step_size,*,casting='same_kind'):
-        self._add_loop_offset(loop,_bool_set.BOOL_SET_CLIP,magnitude,arc_step_size,casting)
+    def add_offset_clip(self,loop,double magnitude,int arc_step_size,bint closed=True,*,casting='same_kind'):
+        self._add_offset(loop,_bool_set.BOOL_SET_CLIP,magnitude,arc_step_size,closed,casting)
 
     cdef _add_loops(self,loops,bset,casting_obj):
         cdef np.NPY_CASTING casting
         common._casting_converter(casting_obj,&casting)
         self.calc_dtype = load_loops(self._clip.base,loops,to_bool_set(bset),self.calc_dtype,casting,self._clip.tracker.callbacks())
 
-    cdef _add_loops_offset(self,loops,bset,double magnitude,int step_size,casting_obj):
+    cdef _add_offsets(self,loops,bset,double magnitude,int step_size,bint closed,casting_obj):
         cdef np.NPY_CASTING casting
         common._casting_converter(casting_obj,&casting)
-        self.calc_dtype = load_loops_offset(self._clip.base,loops,bset,magnitude,step_size,self.calc_dtype,casting,self._clip.tracker.callbacks())
+        self.calc_dtype = load_offsets(self._clip.base,loops,bset,magnitude,step_size,closed,self.calc_dtype,casting,self._clip.tracker.callbacks())
 
     def add_loops(self,loops,bset,*,casting='same_kind'):
         self._add_loops(loops,bset,casting)
@@ -744,14 +745,14 @@ cdef class TrackedClipper:
     def add_loops_clip(self,loops,*,casting='same_kind'):
         self._add_loops(loops,_bool_set.BOOL_SET_CLIP,casting)
     
-    def add_loops_offset(self,loops,bset,double magnitude,int arc_step_size,*,casting='same_kind'):
-        self._add_loops_offset(loops,bset,magnitude,arc_step_size,casting)
+    def add_offsets(self,loops,bset,double magnitude,int arc_step_size,bint closed=True,*,casting='same_kind'):
+        self._add_offsets(loops,bset,magnitude,arc_step_size,closed,casting)
 
-    def add_loops_offset_subject(self,loops,double magnitude,int arc_step_size,*,casting='same_kind'):
-        self._add_loops_offset(loops,_bool_set.BOOL_SET_SUBJECT,magnitude,arc_step_size,casting)
+    def add_offsets_subject(self,loops,double magnitude,int arc_step_size,bint closed=True,*,casting='same_kind'):
+        self._add_offsets(loops,_bool_set.BOOL_SET_SUBJECT,magnitude,arc_step_size,closed,casting)
 
-    def add_loops_offset_clip(self,loops,double magnitude,int arc_step_size,*,casting='same_kind'):
-        self._add_loops_offset(loops,_bool_set.BOOL_SET_CLIP,magnitude,arc_step_size,casting)
+    def add_offsets_clip(self,loops,double magnitude,int arc_step_size,bint closed=True,*,casting='same_kind'):
+        self._add_offsets(loops,_bool_set.BOOL_SET_CLIP,magnitude,arc_step_size,closed,casting)
 
     def execute(self,op,*,dtype=None,bint tree_out=False):
         dtype = check_dtype(dtype)

@@ -96,17 +96,6 @@ public:
     virtual void point_added(Index original_i) = 0;
 
     /**
-     * Called if the last "n" points added were removed.
-     *
-     * This only happens when a polygon is added with fewer than three points.
-     * The clipper class doesn't work with such polygons and after counting the
-     * number of points added, will remove the points of those polygons.
-     *
-     * \param n The number of points to remove. This will be equal to 1 or 2.
-     */
-    virtual void points_removed(Index n) = 0;
-
-    /**
      * Called by any of the "add_loops" functions to reset state.
      *
      * After `clipper::execute` is called, the first time an "add_loops"
@@ -683,7 +672,7 @@ public:
         hsign1(hsign_of(dp1)), hsign2(hsign_of(dp2)),
         wn1(dp1.x() < 0 ? -1 : 0), wn2(dp2.x() < 0 ? -1 : 0)
     {
-        POLY_OPS_ASSERT(hsign1 && hsign2 && p1 != p2 && points[p1].data == points[p2].data);
+        POLY_OPS_ASSERT(p1 != p2 && points[p1].data == points[p2].data);
     }
 
     void check(segment<Index> s) {
@@ -773,7 +762,6 @@ public:
         dp1(line_delta(points,p1)),
         hsign(hsign_of(dp1)), wn{0,0}
     {
-        POLY_OPS_ASSERT(hsign);
         if(dp1.x() < 0) wn[static_cast<int>(points[p1].bset())] = -1;
     }
 
@@ -1819,7 +1807,7 @@ template<coordinate Coord,std::integral Index=std::size_t> class clipper {
 
     detail::breaks_t<Index,Coord> breaks;
     detail::rand_generator rgen;
-    Index original_i;
+    Index _next_orig_i;
     bool ran;
 
     std::pmr::vector<detail::temp_polygon<Index>> loops_out;
@@ -1844,7 +1832,7 @@ template<coordinate Coord,std::integral Index=std::size_t> class clipper {
 
     template<point_range<Coord> R> void _add_loop(R &&loop,bool_set cat,i_point_tracker<Index> *pt) {
         auto sink = add_loop(cat,pt);
-        for(point_t<Coord> p : loop) sink(p,original_i + 1);
+        for(point_t<Coord> p : loop) sink(p);
     }
 
 public:
@@ -1854,20 +1842,45 @@ public:
         clipper &n;
         i_point_tracker<Index> *pt;
         point_t<Coord> prev;
+        Index prev_orig_i;
         Index first_i;
+
+        /* Calling pt's methods is delayed until we verify that there are more
+        than two unique points. Otherwise, the loop is discarded. */
+        Index first_orig_i;
+        Index second_orig_i;
+
         bool_set cat;
         bool started;
 
-        point_sink(clipper &n,bool_set cat,i_point_tracker<Index> *pt) : n{n}, pt{pt}, cat{cat}, started{false} {}
+        point_sink(clipper &n,bool_set cat,i_point_tracker<Index> *pt)
+            : n{n},
+            pt{pt},
+            first_i{Index(n.lpoints.size())},
+            cat{cat},
+            started{false} {}
         point_sink(const point_sink&) = delete;
-        point_sink(point_sink &&b) : n{b.n}, pt{b.pt}, prev{b.prev}, first_i{b.first_i}, cat{b.cat}, started{b.started} {
+        point_sink(point_sink &&b)
+            : n{b.n},
+            pt{b.pt},
+            prev{b.prev},
+            prev_orig_i{b.prev_orig_i},
+            first_i{b.first_i},
+            first_orig_i{b.first_orig_i},
+            second_orig_i{b.second_orig_i},
+            cat{b.cat},
+            started{b.started}
+        {
             b.started = false;
         }
 
+        void finalize_prev();
+
     public:
-        void operator()(const point_t<Coord> &p,Index orig_i=0);
-        Index last_orig_i() const { return n.original_i; }
-        Index &last_orig_i() { return n.original_i; }
+        void operator()(const point_t<Coord> &p,Index orig_i);
+        void operator()(const point_t<Coord> &p) { (*this)(p,n._next_orig_i); }
+        Index next_orig_i() const { return n._next_orig_i; }
+        Index &next_orig_i() { return n._next_orig_i; }
         ~point_sink();
     };
 
@@ -1878,7 +1891,7 @@ public:
         samples(contig_mem),
         events(contig_mem),
         breaks(contig_mem,&discrete_mem),
-        original_i(static_cast<Index>(-1)),
+        _next_orig_i(0),
         ran(false),
         loops_out(contig_mem),
         top(contig_mem)
@@ -2006,48 +2019,56 @@ public:
         return execute<TreeOut,null_tracker<Coord,Index>>(op,{});
     }
 
-    Index &last_orig_i() noexcept { return original_i; }
-    Index last_orig_i() const noexcept { return original_i; }
+    Index &next_orig_i() noexcept { return _next_orig_i; }
+    Index next_orig_i() const noexcept { return _next_orig_i; }
+
+    std::pmr::memory_resource *memory() const noexcept { return contig_mem; }
 };
 
 template<coordinate Coord,std::integral Index>
-void clipper<Coord,Index>::point_sink::operator()(const point_t<Coord> &p,Index orig_i) {
-    if(started) [[likely]] {
-        if(prev == n.lpoints.back().data) goto skip;
-    } else {
-        prev = p;
-        first_i = static_cast<Index>(n.lpoints.size());
-        started = true;
-        n.original_i = orig_i;
+void clipper<Coord,Index>::point_sink::finalize_prev() {
+    if(!n.lpoints.empty() && prev == n.lpoints.back().data) return;
+
+    if(pt) {
+        switch(n.lpoints.size() - std::size_t(first_i)) {
+        case 0:
+            first_orig_i = prev_orig_i;
+            break;
+        case 1:
+            second_orig_i = prev_orig_i;
+            break;
+        case 2:
+            pt->point_added(first_orig_i);
+            pt->point_added(second_orig_i);
+            [[fallthrough]];
+        default:
+            pt->point_added(prev_orig_i);
+        }
     }
 
-    /* Normally, points aren't added until this is called with the next point or
-    the destructor is called, but duplicate points aren't added anyway and
-    adding it on the first call means the "prev != n.lpoints.back().data" checks
-    above and in the destructor are always safe. */
-    n.lpoints.emplace_back(prev,static_cast<Index>(n.lpoints.size()+1),cat);
-    if(pt) pt->point_added(n.original_i);
+    n.lpoints.emplace_back(prev,Index(n.lpoints.size()+1),cat);
+}
 
-skip:
+template<coordinate Coord,std::integral Index>
+void clipper<Coord,Index>::point_sink::operator()(const point_t<Coord> &p,Index orig_i) {
+    if(started) finalize_prev();
     prev = p;
-    n.original_i = orig_i;
+    prev_orig_i = orig_i;
+    n._next_orig_i = orig_i + 1;
+    started = true;
 }
 template<coordinate Coord,std::integral Index>
 clipper<Coord,Index>::point_sink::~point_sink() {
+    /* This code doesn't work with polygons with fewer than three points. A
+    polygon with two points almost works, except the two lines have the same
+    end-point indices. The sweep sets expect line segments with unique indices.
+    */
     if(started) [[likely]] {
-        if(prev != n.lpoints.back().data && prev != n.lpoints[first_i].data) [[likely]] {
-            n.lpoints.emplace_back(prev,Index(0),cat);
-            if(pt) pt->point_added(n.original_i);
-        }
+        if(prev != n.lpoints[first_i].data) [[likely]] finalize_prev();
 
-        /* This code doesn't work with polygons with fewer than three points. A
-        polygon with one point has no effect anyway. A polygon with two points
-        almost works, except the two lines have the same end-point indices. The
-        sweep sets expect line segments with unique indices. */
-        std::size_t new_points = n.lpoints.size() - static_cast<std::size_t>(first_i);
-        if(new_points < 3) [[unlikely]] {
-            if(pt) pt->points_removed(static_cast<Index>(new_points - 1));
-            while(new_points-- > 0) n.lpoints.pop_back();
+        std::size_t points_added = n.lpoints.size() - std::size_t(first_i);
+        if(points_added < 3) [[unlikely]] {
+            while(points_added-- > 0) n.lpoints.pop_back();
         } else {
             n.lpoints.back().next = first_i;
             n.lpoints.back().state() = detail::line_state::check;
@@ -2469,7 +2490,7 @@ void clipper<Coord,Index>::reset() {
     lpoints.clear();
     samples.clear();
     sweep_nodes.resize(1);
-    original_i = static_cast<Index>(-1);
+    _next_orig_i = 0;
     ran = false;
 }
 

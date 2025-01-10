@@ -219,6 +219,17 @@ class MiniFlatSetPrinter:
         except Exception as e:
             return str(e)
 
+class PointAndOriginPrinter:
+    """Print a poly_ops::point_and_origin instance"""
+    def __init__(self,val):
+        self.val = val
+
+    def to_string(self):
+        orig_dbg = self.val['original_points']
+        ptr = orig_dbg['_M_ptr']
+        orig = [str(ptr[i]) for i in range(int(orig_dbg['_M_extent']['_M_extent_value']))]
+        return '{%s, {%s}}' % (str(self.val['p']),','.join(orig))
+
 def build_pretty_printer():
     pp = gdb.printing.RegexpCollectionPrettyPrinter('polyops')
     pp.add_printer('point_t','^poly_ops::point_t<.*>$',PointPrinter)
@@ -228,4 +239,5 @@ def build_pretty_printer():
     pp.add_printer('compound_xint','^poly_ops::large_ints::compound_xint<.*>$',CompoundIntPrinter)
     pp.add_printer('draw_event','^poly_ops::draw::detail::event<.*>$',DrawEventPrinter)
     pp.add_printer('mini_flat_set','^poly_ops::detail::mini_flat_set<.*>$',MiniFlatSetPrinter)
+    pp.add_printer('point_t','^poly_ops::point_and_origin<.*>$',PointAndOriginPrinter)
     return pp

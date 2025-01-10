@@ -236,7 +236,7 @@ polyops module
     ============ ================ ====================================
 
 
-.. py:function::  offset(loops: Iterable[PointArrayLike],magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind",dtype: DTypeLike = None,tree_out: bool = False,track_points: bool = False)
+.. py:function::  offset(loops: Iterable[PointArrayLike],magnitude: float,arc_step_size: int,closed: bool=True,*,casting: CastingKind = "same_kind",dtype: DTypeLike = None,tree_out: bool = False,track_points: bool = False)
 
     Inflate or shrink each loop in ``loops`` and return the union.
 
@@ -294,17 +294,17 @@ polyops module
 
         Add input *clip* polygons.
 
-    .. py:method:: add_loop_offset(self,loop: PointArrayLike,bset: BoolSet,magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_offset(self,loop: PointArrayLike,bset: BoolSet,magnitude: float,arc_step_size: int,closed: bool = True,*,casting: CastingKind = "same_kind") -> None
 
-    .. py:method:: add_loop_offset_subject(self,loop: PointArrayLike,magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_offset_subject(self,loop: PointArrayLike,magnitude: float,arc_step_size: int,closed: bool = True,*,casting: CastingKind = "same_kind") -> None
 
-    .. py:method:: add_loop_offset_clip(self,loop: PointArrayLike,magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_offset_clip(self,loop: PointArrayLike,magnitude: float,arc_step_size: int,closed: bool = True,*,casting: CastingKind = "same_kind") -> None
 
-    .. py:method:: add_loops_offset(self,loops: Iterable[PointArrayLike],bset: BoolSet,magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_offsets(self,loops: Iterable[PointArrayLike],bset: BoolSet,magnitude: float,arc_step_size: int,closed: bool = True,*,casting: CastingKind = "same_kind") -> None
 
-    .. py:method:: add_loops_offset_subject(self,loops: Iterable[PointArrayLike],magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_offsets_subject(self,loops: Iterable[PointArrayLike],magnitude: float,arc_step_size: int,closed: bool = True,*,casting: CastingKind = "same_kind") -> None
 
-    .. py:method:: add_loops_offset_clip(self,loops: Iterable[PointArrayLike],magnitude: float,arc_step_size: int,*,casting: CastingKind = "same_kind") -> None
+    .. py:method:: add_offsets_clip(self,loops: Iterable[PointArrayLike],magnitude: float,arc_step_size: int,closed: bool = True,*,casting: CastingKind = "same_kind") -> None
 
     .. py:method:: execute(op: BoolOp,*,dtype: DTypeLike = None,tree_out: bool = False)
 
