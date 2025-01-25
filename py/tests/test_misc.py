@@ -213,7 +213,7 @@ class Tests(unittest.TestCase):
         if clipper is None:
             result = polyops.offset([loop],offset,arc_step_size,track_points=True)
         else:
-            clipper.add_loop_offset_subject(loop,offset,arc_step_size)
+            clipper.add_offset_subject(loop,offset,arc_step_size)
             result = clipper.execute(polyops.BoolOp.union)
         self.assertEqual(len(result),1)
         box2 = result[0]

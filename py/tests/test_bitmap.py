@@ -161,8 +161,8 @@ class BitmapTestCase(unittest.TestCase):
                     test_img = np.zeros_like(target_img)
 
                     if offset:
-                        self.clip.add_loops_offset_subject(item.set_data[polyops.BoolSet.subject],offset,OFFSET_ARC_STEP_SIZE)
-                        self.clip.add_loops_offset_clip(item.set_data[polyops.BoolSet.clip],offset,OFFSET_ARC_STEP_SIZE)
+                        self.clip.add_offsets_subject(item.set_data[polyops.BoolSet.subject],offset,OFFSET_ARC_STEP_SIZE)
+                        self.clip.add_offsets_clip(item.set_data[polyops.BoolSet.clip],offset,OFFSET_ARC_STEP_SIZE)
                     else:
                         self.clip.add_loops_subject(item.set_data[polyops.BoolSet.subject])
                         self.clip.add_loops_clip(item.set_data[polyops.BoolSet.clip])
